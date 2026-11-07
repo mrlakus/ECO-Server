@@ -125,3 +125,13 @@ test('полные партии случайными ходами заверша
     for (const s of g.scores!) assert.equal(s.total, s.garden + s.perennials + s.apiary + s.orchard + s.barn);
   }
 });
+
+test('первый раунд всегда начинается с клетки «Посадка или полив»', () => {
+  assert.equal(FIELD[0].id, 'plantWater');
+  for (let seed = 1; seed <= 30; seed++) {
+    const g = createGame([{ id: 'a', name: 'A' }, { id: 'b', name: 'B' }], seeded(seed));
+    const groups = g.field.map((d, i) => ({ d, i })).filter((x) => x.d.length);
+    const lowest = Math.min(...groups.map((x) => x.d[0]));
+    assert.deepEqual(g.field[0].length > 0 && g.field[0][0] === lowest, true, `seed=${seed}`);
+  }
+});

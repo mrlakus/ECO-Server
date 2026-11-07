@@ -289,7 +289,7 @@ function renderBoard(): string {
   const cells = FIELD.map((f, i) => {
     const dice = s.field[i];
     const can = picking && options!.pickCells!.includes(i);
-    return `<button class="fcell ${can ? 'pick' : ''} ${i === 0 ? 'gold' : ''}" data-a="pick" data-v="${i}" ${can ? '' : 'disabled'}>
+    return `<button class="fcell ${can ? 'pick' : ''} ${f.gold ? 'gold' : ''}" data-a="pick" data-v="${i}" ${can ? '' : 'disabled'}>
       <span class="n">${i + 1}</span><span class="name">${esc(f.name)}</span>
       <span class="dice">${dice.map((v) => die(v)).join('')}</span>
       ${s.edith === i ? '<span class="edith" title="Фишка Эдит">👩‍🌾</span>' : ''}

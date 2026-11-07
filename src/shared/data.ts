@@ -183,15 +183,20 @@ export const FRUITBOWL_VP = [0, 1, 4, 7, 10];
 // ---------- Игровое поле ----------
 
 export type FieldCell = 'apiaryGardenGold' | 'plantWater' | 'barn' | 'compostGoods' | 'apiaryGarden' | 'barn2' | 'market';
-/** Клетки поля по часовой стрелке; клетка 0 — со «золотой кнопкой» (стартовая для Эдит). */
-export const FIELD: { id: FieldCell; name: string }[] = [
-  { id: 'apiaryGardenGold', name: 'Пасека или сад' },
+/**
+ * Клетки поля по часовой стрелке. Эдит в начале партии стоит на клетке 0 («Посадка или полив»):
+ * с неё в первом раунде кладётся набор с наименьшим значением.
+ * (По печатным правилам стартовая клетка — «Пасека или сад» с золотой кнопкой; здесь выбрано иначе,
+ * порядок обхода по кругу при этом сохранён. `gold` — только пометка клетки с золотой кнопкой.)
+ */
+export const FIELD: { id: FieldCell; name: string; gold?: boolean }[] = [
   { id: 'plantWater', name: 'Посадка или полив' },
   { id: 'barn', name: 'Сарай' },
   { id: 'compostGoods', name: '1 компост и 4 товара' },
   { id: 'apiaryGarden', name: 'Пасека или сад' },
   { id: 'barn2', name: 'Сарай' },
   { id: 'market', name: 'Фермерский рынок' },
+  { id: 'apiaryGardenGold', name: 'Пасека или сад', gold: true },
 ];
 
 export type EventType = 'barn' | 'rain' | 'market';
