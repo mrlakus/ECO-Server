@@ -1,0 +1,25 @@
+{
+  "name": "three-sisters-online",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Онлайн-версия настольной игры «Три сестры» для 2–4 игроков",
+  "type": "module",
+  "scripts": {
+    "build:client": "esbuild src/client/main.ts --bundle --outfile=public/app.js --target=es2020 --minify",
+    "build": "npm run build:client",
+    "start": "npm run build && tsx src/server/index.ts",
+    "dev": "tsx watch src/server/index.ts",
+    "test": "tsx --test test/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/ws": "^8.5.12",
+    "esbuild": "^0.25.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  }
+}
