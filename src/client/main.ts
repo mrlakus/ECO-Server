@@ -40,7 +40,7 @@ interface RoomInfo {
   code: string;
   hostId: string;
   started: boolean;
-  members: { id: string; name: string; connected: boolean }[];
+  members: { id: string; name: string; connected: boolean; bot?: boolean }[];
 }
 interface Session {
   code: string;
@@ -228,10 +228,11 @@ function renderRoom(): string {
         ${r.members
           .map(
             (m) =>
-              `<li><span class="dot ${m.connected ? 'on' : ''}"></span>${esc(m.name)}${m.id === you ? ' <small>(вы)</small>' : ''}${m.id === r.hostId ? '<span class="badge">хозяин</span>' : ''}</li>`,
+              `<li><span class="dot ${m.connected ? 'on' : ''}"></span>${esc(m.name)}${m.id === you ? ' <small>(вы)</small>' : ''}${m.id === r.hostId ? '<span class="badge">хозяин</span>' : ''}${m.bot && isHost ? `<button class="btn sec" data-a="removebot" data-v="${m.id}" style="flex:none;min-height:32px;padding:0 10px;margin-left:auto">✕</button>` : ''}</li>`,
           )
           .join('')}
       </ul>
+      ${isHost && r.members.length < MAX_PLAYERS ? '<button class="btn sec block" style="margin-top:10px" data-a="addbot">🤖 Добавить бота</button>' : ''}
     </div>
     ${
       isHost
@@ -610,6 +611,10 @@ app.addEventListener('click', (ev) => {
       return send({ type: 'start' });
     case 'restart':
       return send({ type: 'restart' });
+    case 'addbot':
+      return send({ type: 'addbot' });
+    case 'removebot':
+      return send({ type: 'removebot', id: v });
     case 'leave':
       if (confirm('Выйти из комнаты?')) send({ type: 'leave' });
       return;

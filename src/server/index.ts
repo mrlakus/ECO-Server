@@ -5,6 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { applyAction, createGame, optionsFor } from '../shared/engine';
+import { chooseAction } from '../shared/bot';
 import type { Action, GameState } from '../shared/types';
 import { MAX_PLAYERS, MIN_PLAYERS } from '../shared/data';
 
@@ -17,6 +18,7 @@ interface Member {
   token: string; // секрет для переподключения
   name: string;
   socket: WebSocket | null;
+  bot?: boolean;
 }
 interface Room {
   code: string;
@@ -24,6 +26,7 @@ interface Room {
   members: Member[];
   game: GameState | null;
   touched: number;
+  botTimer?: NodeJS.Timeout;
 }
 const rooms = new Map<string, Room>();
 
@@ -51,7 +54,7 @@ function publicRoom(room: Room) {
     code: room.code,
     hostId: room.hostId,
     started: !!room.game,
-    members: room.members.map((m) => ({ id: m.id, name: m.name, connected: !!m.socket })),
+    members: room.members.map((m) => ({ id: m.id, name: m.name, connected: !!m.bot || !!m.socket, bot: !!m.bot })),
   };
 }
 
@@ -67,6 +70,34 @@ function broadcast(room: Room) {
     }
     send(m.socket, msg);
   }
+  scheduleBots(room);
+}
+
+const humans = (room: Room) => room.members.filter((m) => !m.bot);
+const BOT_DELAY_MS = 1100;
+
+/** Боты ходят по одному действию с небольшой паузой, чтобы человек успевал следить за игрой. */
+function scheduleBots(room: Room) {
+  const game = room.game;
+  if (!game || game.phase === 'over' || room.botTimer) return;
+  if (!room.members.some((m) => !m.bot && m.socket)) return; // нет людей онлайн — боты ждут
+  const bots = room.members.filter((m) => m.bot);
+  const busy = (id: string) => !['wait', 'over', 'rain'].includes(optionsFor(game, id).kind);
+  if (!bots.some((b) => busy(b.id))) return;
+  room.botTimer = setTimeout(() => {
+    room.botTimer = undefined;
+    const g = room.game;
+    if (!g || g.phase === 'over') return;
+    for (const b of bots) {
+      if (!busy(b.id)) continue;
+      const action = chooseAction(g, b.id, rng);
+      if (!action) continue;
+      if (!applyAction(g, b.id, action, rng).ok) applyAction(g, b.id, { t: 'skip' }, rng);
+      break;
+    }
+    broadcast(room);
+  }, BOT_DELAY_MS);
+  room.botTimer.unref();
 }
 
 // ---------------------------------------------------------------------------
@@ -155,12 +186,34 @@ function handle(ws: WebSocket, conn: Conn, raw: string) {
       broadcast(room);
       return;
     }
+    case 'addbot': {
+      const { room, member } = conn;
+      if (!room || !member) return err('Вы не в комнате');
+      if (room.hostId !== member.id) return err('Только создатель комнаты');
+      if (room.game) return err('Игра уже идёт');
+      if (room.members.length >= MAX_PLAYERS) return err('Комната заполнена');
+      const nBots = room.members.filter((m) => m.bot).length;
+      room.members.push({ id: newId(), token: randomBytes(16).toString('hex'), name: nBots ? `🤖 Бот ${nBots + 1}` : '🤖 Бот', socket: null, bot: true });
+      broadcast(room);
+      return;
+    }
+    case 'removebot': {
+      const { room, member } = conn;
+      if (!room || !member) return;
+      if (room.hostId !== member.id) return err('Только создатель комнаты');
+      if (room.game) return err('Игра уже идёт');
+      room.members = room.members.filter((m) => !(m.bot && m.id === msg.id));
+      broadcast(room);
+      return;
+    }
     case 'restart': {
       const { room, member } = conn;
       if (!room || !member) return;
       if (room.hostId !== member.id) return err('Только создатель комнаты');
       if (!room.game || room.game.phase !== 'over') return err('Партия ещё не окончена');
       room.game = null;
+      if (room.botTimer) clearTimeout(room.botTimer);
+      room.botTimer = undefined;
       broadcast(room);
       return;
     }
@@ -169,8 +222,8 @@ function handle(ws: WebSocket, conn: Conn, raw: string) {
       if (!room || !member) return;
       if (!room.game) {
         room.members = room.members.filter((m) => m !== member);
-        if (room.hostId === member.id && room.members.length) room.hostId = room.members[0].id;
-        if (!room.members.length) rooms.delete(room.code);
+        if (room.hostId === member.id && humans(room).length) room.hostId = humans(room)[0].id;
+        if (!humans(room).length) rooms.delete(room.code);
         else broadcast(room);
       } else {
         member.socket = null;
@@ -255,8 +308,8 @@ wss.on('connection', (ws) => {
         setTimeout(() => {
           if (member.socket || !rooms.has(room.code) || room.game) return;
           room.members = room.members.filter((m) => m !== member);
-          if (room.hostId === member.id && room.members.length) room.hostId = room.members[0].id;
-          if (!room.members.length) rooms.delete(room.code);
+          if (room.hostId === member.id && humans(room).length) room.hostId = humans(room)[0].id;
+          if (!humans(room).length) rooms.delete(room.code);
           else broadcast(room);
         }, 120000).unref();
       }
