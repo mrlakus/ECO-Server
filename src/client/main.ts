@@ -41,6 +41,7 @@ interface RoomInfo {
   code: string;
   hostId: string;
   started: boolean;
+  vote?: { by: string; byName: string; waiting: string[] } | null;
   members: { id: string; name: string; connected: boolean; bot?: boolean }[];
 }
 interface Session {
@@ -131,6 +132,15 @@ function onMessage(m: any) {
       }
       break;
     }
+    case 'ended':
+      saveSession(null);
+      room = null;
+      state = null;
+      options = null;
+      selection = null;
+      history.replaceState(null, '', location.pathname);
+      toast(m.message);
+      break;
     case 'left':
       saveSession(null);
       room = null;
@@ -274,6 +284,7 @@ function renderGame(): string {
   <header class="top">
     <span class="round">Раунд ${Math.min(s.round, ROUNDS)}/${ROUNDS}</span>
     <span class="ev">${phaseName}${connected ? '' : ' · ⚠ нет связи'}</span>
+    ${over ? '' : '<button class="hbtn" data-a="proposeend" title="Предложить всем закончить игру и выйти в меню">🏳 <span>Закончить игру</span></button>'}
     ${document.fullscreenEnabled ? `<button class="fs" data-a="fullscreen" title="На весь экран">${document.fullscreenElement ? '✕' : '⛶'}</button>` : ''}
     <nav class="tabs">
       <button data-a="tab" data-v="board" class="${tab === 'board' ? 'on' : ''}">Поле</button>
@@ -283,7 +294,25 @@ function renderGame(): string {
   ${portrait ? '<div class="rotate-hint">↻ Поверните устройство горизонтально — так планшет виден крупнее</div>' : ''}
   <main class="fit"><div class="stage ${wide ? 'wide' : ''}">${tab === 'board' ? renderBoard() : renderSheet()}</div></main>
   ${renderDock()}
-  ${over && showResults ? `<div class="overlay">${renderResults()}</div>` : ''}`;
+  ${over && showResults ? `<div class="overlay">${renderResults()}</div>` : ''}
+  ${renderVote()}`;
+}
+
+/** Окно голосования «закончить игру»: у остальных игроков — вопрос, у предложившего — ожидание. */
+function renderVote(): string {
+  const v = room?.vote;
+  if (!v || !state || state.phase === 'over') return '';
+  if (v.waiting.includes(you))
+    return `<div class="overlay vote"><div class="paper results-card"><h3 class="script">🏳 ${esc(v.byName)} предлагает закончить игру</h3>
+      <p class="legend" style="margin:0 0 12px;font-size:1rem">Если согласны все, партия прервётся и все выйдут в главное меню. Если кто-то откажется, игра продолжится.</p>
+      <div class="row"><button class="btn" data-a="voteyes">Да, закончить</button><button class="btn sec" data-a="voteno">Нет, играем дальше</button></div></div></div>`;
+  if (v.by === you) {
+    const names = v.waiting.map((id) => esc(nameOf(id))).join(', ');
+    return `<div class="overlay vote"><div class="paper results-card"><h3 class="script">Вы предложили закончить игру</h3>
+      <p class="legend" style="margin:0 0 12px;font-size:1rem">Ждём ответа: <b>${names || '…'}</b>. Боты согласны.</p>
+      <button class="btn sec block" data-a="cancelend">Отозвать предложение</button></div></div>`;
+  }
+  return '';
 }
 
 // ---------------------------------------------------------------------------
@@ -732,6 +761,15 @@ app.addEventListener('click', (ev) => {
     case 'view':
       viewId = v;
       return render();
+    case 'proposeend':
+      if (confirm('Предложить всем закончить игру? Если все согласятся, партия прервётся и все выйдут в главное меню.')) send({ type: 'proposeend' });
+      return;
+    case 'voteyes':
+      return send({ type: 'voteend', yes: true });
+    case 'voteno':
+      return send({ type: 'voteend', yes: false });
+    case 'cancelend':
+      return send({ type: 'cancelend' });
     case 'fullscreen':
       if (document.fullscreenElement) void document.exitFullscreen();
       else void document.documentElement.requestFullscreen?.();

@@ -414,3 +414,8 @@ main.fit { height: calc(100dvh - var(--hh) - var(--dh)); display: flex; align-it
 .stage .acol .fxx { font-size: calc(var(--u) * 1.2); }
 .stage .acol { padding: .4em .15em; }
 .legend2 { font-size: calc(var(--u) * 1.4); }
+
+.hbtn { background: rgba(255, 255, 255, .18); border: 2px solid rgba(255, 255, 255, .55); color: #fff; border-radius: 16px; padding: 3px 12px; font-size: .9rem; font-weight: 700; white-space: nowrap; }
+.hbtn:active { background: rgba(255, 255, 255, .35); }
+.overlay.vote { z-index: 70; }
+@media (max-width: 760px) { .hbtn span { display: none; } }

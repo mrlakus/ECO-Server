@@ -8,6 +8,7 @@ import { applyAction, createGame, optionsFor } from '../shared/engine';
 import { chooseAction } from '../shared/bot';
 import type { Action, GameState } from '../shared/types';
 import { MAX_PLAYERS, MIN_PLAYERS } from '../shared/data';
+import { DECLINE_COOLDOWN_MS, VOTE_TIMEOUT_MS, waitingFor } from './vote';
 
 const PUBLIC_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../public');
 const PORT = Number(process.env.PORT ?? 3000);
@@ -27,6 +28,9 @@ interface Room {
   game: GameState | null;
   touched: number;
   botTimer?: NodeJS.Timeout;
+  vote?: { by: string; yes: Set<string>; timer: NodeJS.Timeout };
+  lastDecline: Record<string, number>;
+  closed?: boolean;
 }
 const rooms = new Map<string, Room>();
 
@@ -54,6 +58,7 @@ function publicRoom(room: Room) {
     code: room.code,
     hostId: room.hostId,
     started: !!room.game,
+    vote: room.vote ? { by: room.vote.by, byName: nameOf(room, room.vote.by), waiting: waitingIds(room) } : null,
     members: room.members.map((m) => ({ id: m.id, name: m.name, connected: !!m.bot || !!m.socket, bot: !!m.bot })),
   };
 }
@@ -74,6 +79,38 @@ function broadcast(room: Room) {
 }
 
 const humans = (room: Room) => room.members.filter((m) => !m.bot);
+const nameOf = (room: Room, id: string) => room.members.find((m) => m.id === id)?.name ?? '';
+
+function gameLog(room: Room, msg: string) {
+  if (!room.game) return;
+  room.game.log.push(msg);
+  if (room.game.log.length > 80) room.game.log.splice(0, room.game.log.length - 80);
+}
+
+// ----- Голосование «закончить игру» -----
+function waitingIds(room: Room): string[] {
+  if (!room.vote) return [];
+  return waitingFor(room.vote.yes, room.vote.by, humans(room).map((m) => ({ id: m.id, online: !!m.socket })));
+}
+function clearVote(room: Room) {
+  if (room.vote) clearTimeout(room.vote.timer);
+  room.vote = undefined;
+}
+/** Все ли согласны? Если да — закрываем стол и отправляем всех в меню. */
+function checkVote(room: Room) {
+  if (!room.vote || waitingIds(room).length > 0) return;
+  gameLog(room, '🏁 Игра закончена досрочно: все согласны');
+  clearVote(room);
+  if (room.botTimer) clearTimeout(room.botTimer);
+  room.botTimer = undefined;
+  room.closed = true;
+  broadcast(room); // последняя запись журнала успевает уйти клиентам
+  for (const m of room.members) {
+    send(m.socket, { type: 'ended', message: 'Игра закончена досрочно: все игроки согласились' });
+  }
+  console.log(`Комната ${room.code}: игра закончена досрочно по согласию`);
+  rooms.delete(room.code);
+}
 const BOT_DELAY_MS = 1100;
 
 /** Боты ходят по одному действию с небольшой паузой, чтобы человек успевал следить за игрой. */
@@ -136,13 +173,14 @@ function handle(ws: WebSocket, conn: Conn, raw: string) {
   }
   if (!msg || typeof msg.type !== 'string') return;
   const err = (message: string) => send(ws, { type: 'error', message });
+  if (conn.room?.closed && msg.type !== 'ping' && msg.type !== 'create' && msg.type !== 'join') return err('Стол закрыт');
 
   switch (msg.type) {
     case 'create': {
       const name = cleanName(msg.name);
       if (!name) return err('Введите имя');
       const member: Member = { id: newId(), token: randomBytes(16).toString('hex'), name, socket: null };
-      const room: Room = { code: newCode(), hostId: member.id, members: [member], game: null, touched: Date.now() };
+      const room: Room = { code: newCode(), hostId: member.id, members: [member], game: null, touched: Date.now(), lastDecline: {} };
       rooms.set(room.code, room);
       attach(ws, conn, room, member);
       return;
@@ -183,6 +221,55 @@ function handle(ws: WebSocket, conn: Conn, raw: string) {
       if (!room || !member || !room.game) return err('Игра не идёт');
       const res = applyAction(room.game, member.id, msg.action as Action, rng);
       if (!res.ok) return err(res.error);
+      broadcast(room);
+      return;
+    }
+    case 'proposeend': {
+      const { room, member } = conn;
+      if (!room || !member || !room.game) return err('Игра не идёт');
+      if (room.game.phase === 'over') return err('Партия уже окончена');
+      if (room.vote) return err('Голосование уже идёт');
+      const wait = (room.lastDecline[member.id] ?? 0) + DECLINE_COOLDOWN_MS - Date.now();
+      if (wait > 0) return err(`Подождите ${Math.ceil(wait / 1000)} с перед новым предложением`);
+      room.vote = {
+        by: member.id,
+        yes: new Set(),
+        timer: setTimeout(() => {
+          if (!room.vote || room.closed) return;
+          gameLog(room, '⏱ Время на голосование вышло — игра продолжается');
+          clearVote(room);
+          broadcast(room);
+        }, VOTE_TIMEOUT_MS),
+      };
+      room.vote.timer.unref();
+      gameLog(room, `🏳 ${member.name} предлагает закончить игру`);
+      for (const b of room.members.filter((m) => m.bot)) gameLog(room, `✔ ${b.name}: согласие закончить игру`);
+      if (waitingIds(room).length) broadcast(room);
+      else checkVote(room);
+      return;
+    }
+    case 'voteend': {
+      const { room, member } = conn;
+      if (!room || !member || !room.game || !room.vote) return err('Сейчас нет голосования');
+      if (member.id === room.vote.by) return;
+      if (msg.yes === true) {
+        room.vote.yes.add(member.id);
+        gameLog(room, `✔ ${member.name}: согласие закончить игру`);
+        if (waitingIds(room).length) broadcast(room);
+        else checkVote(room);
+      } else {
+        gameLog(room, `✖ ${member.name}: отказ — игра продолжается`);
+        room.lastDecline[room.vote.by] = Date.now();
+        clearVote(room);
+        broadcast(room);
+      }
+      return;
+    }
+    case 'cancelend': {
+      const { room, member } = conn;
+      if (!room || !member || !room.vote || room.vote.by !== member.id) return;
+      gameLog(room, `↩ Предложение закончить игру отозвано (${member.name}) — игра продолжается`);
+      clearVote(room);
       broadcast(room);
       return;
     }
@@ -228,6 +315,7 @@ function handle(ws: WebSocket, conn: Conn, raw: string) {
       } else {
         member.socket = null;
         broadcast(room);
+        checkVote(room);
       }
       conn.room = null;
       conn.member = null;
@@ -314,6 +402,7 @@ wss.on('connection', (ws) => {
         }, 120000).unref();
       }
       broadcast(room);
+      checkVote(room);
     }
   });
 });
