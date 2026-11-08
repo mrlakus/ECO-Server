@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createGame, applyAction, optionsFor, scorePlayer, longestPumpkinChain, shiftCost, createPlayer, compostAvail } from '../src/shared/engine';
+import { createGame, applyAction, optionsFor, scorePlayer, scoreParts, longestPumpkinChain, shiftCost, createPlayer, compostAvail } from '../src/shared/engine';
 import { PUMPKINS, PUMPKIN_SYMBOLS, PERENNIALS, UNIT_BED, UNIT_COUNT, FIELD } from '../src/shared/data';
 import { randomMove, seeded } from './helpers';
 
@@ -145,4 +145,22 @@ test('fieldStart помнит исходную раскладку, даже ко
   assert.ok(applyAction(g, g.players[g.first].id, { t: 'pick', cell }, rng).ok);
   assert.equal(g.field[cell].length, before - 1);
   assert.equal(g.fieldStart[cell].length, before);
+});
+
+test('подробный разбор очков: сумма строк равна итогу; итог не изменился относительно прежних правил', () => {
+  for (let seed = 1; seed <= 40; seed++) {
+    const rng = seeded(seed);
+    const n = 2 + (seed % 3);
+    const g = createGame(Array.from({ length: n }, (_, i) => ({ id: `p${i}`, name: `P${i}` })), rng);
+    let steps = 0;
+    while (g.phase !== 'over' && steps++ < 20000) if (!randomMove(g, rng)) break;
+    for (const p of g.players) {
+      const parts = scoreParts(p);
+      const sc = scorePlayer(p);
+      const sum = (c: keyof typeof parts) => parts[c].reduce((x, y) => x + y.vp, 0);
+      assert.equal(sum('garden') + sum('perennials') + sum('apiary') + sum('orchard') + sum('barn'), sc.total, `seed=${seed}`);
+      assert.equal(sum('garden'), sc.garden);
+      assert.ok(Object.values(parts).every((arr) => arr.every((x) => Number.isInteger(x.vp) && x.vp >= 0)));
+    }
+  }
 });

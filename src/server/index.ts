@@ -39,6 +39,7 @@ interface Room {
   overLogged?: boolean;
   pw?: { salt: string; hash: string }; // пароль комнаты (хранится только хеш)
   pwFails: number[]; // времена неудачных попыток ввода пароля
+  rematch?: Set<string>; // кто уже нажал «Реванш»
   chat: ChatMsg[];
   chatSeq: number;
 }
@@ -164,6 +165,7 @@ function publicRoom(room: Room) {
     hostId: room.hostId,
     started: !!room.game,
     locked: !!room.pw,
+    rematch: room.game?.phase === 'over' ? { ready: [...(room.rematch ?? [])], waiting: rematchWaiting(room) } : null,
     vote: room.vote ? { by: room.vote.by, byName: nameOf(room, room.vote.by), waiting: waitingIds(room) } : null,
     members: room.members.map((m) => ({ id: m.id, name: m.name, connected: !!m.bot || !!m.socket, bot: !!m.bot })),
   };
@@ -242,6 +244,28 @@ function gameLog(room: Room, msg: string) {
   if (room.game.log.length > 80) room.game.log.splice(0, room.game.log.length - 80);
 }
 
+// ----- Реванш: все люди онлайн нажимают «Реванш» — партия начинается заново (боты всегда согласны) -----
+function rematchWaiting(room: Room): string[] {
+  return waitingFor(room.rematch ?? new Set(), '', humans(room).map((m) => ({ id: m.id, online: !!m.socket })));
+}
+function checkRematch(room: Room) {
+  if (!room.game || room.game.phase !== 'over' || !room.rematch?.size) return;
+  if (rematchWaiting(room).length) return;
+  const prev = room.game;
+  const next = (prev.firstStart + 1) % room.members.length; // первый ход переходит к следующему игроку
+  room.game = createGame(
+    room.members.map((m) => ({ id: m.id, name: m.name })),
+    rng,
+    next,
+  );
+  room.rematch = undefined;
+  room.overLogged = false;
+  if (room.botTimer) clearTimeout(room.botTimer);
+  room.botTimer = undefined;
+  slog(`комната ${room.code}: реванш — новая партия, игроков: ${room.members.length}`);
+  broadcast(room);
+}
+
 // ----- Голосование «закончить игру» -----
 function waitingIds(room: Room): string[] {
   if (!room.vote) return [];
@@ -266,7 +290,7 @@ function checkVote(room: Room) {
   slog(`комната ${room.code}: партия закончена досрочно по согласию всех`);
   deleteRoom(room, 'партия закончена досрочно');
 }
-const BOT_DELAY_MS = 1100;
+const BOT_DELAY_MS = Number(process.env.BOT_DELAY_MS ?? 1100); // пауза между ходами бота (для тестов можно уменьшить)
 
 /** Боты ходят по одному действию с небольшой паузой, чтобы человек успевал следить за игрой. */
 function scheduleBots(room: Room) {
@@ -486,12 +510,23 @@ function handle(ws: WebSocket, conn: Conn, raw: string) {
       broadcast(room);
       return;
     }
+    case 'rematch': {
+      const { room, member } = conn;
+      if (!room || !member || !room.game || room.game.phase !== 'over') return err('Реванш доступен после окончания партии');
+      room.rematch ??= new Set();
+      if (room.rematch.has(member.id)) room.rematch.delete(member.id);
+      else room.rematch.add(member.id);
+      if (room.rematch.size) checkRematch(room);
+      broadcast(room);
+      return;
+    }
     case 'restart': {
       const { room, member } = conn;
       if (!room || !member) return;
       if (room.hostId !== member.id) return err('Только создатель комнаты');
       if (!room.game || room.game.phase !== 'over') return err('Партия ещё не окончена');
       room.game = null;
+      room.rematch = undefined;
       if (room.botTimer) clearTimeout(room.botTimer);
       room.botTimer = undefined;
       broadcast(room);
@@ -629,6 +664,7 @@ wss.on('connection', (ws) => {
       }
       broadcast(room);
       checkVote(room);
+      checkRematch(room);
     }
   });
 });

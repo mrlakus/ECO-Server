@@ -29,7 +29,7 @@ import {
   UNIT_COUNT,
   type GardenRow,
 } from '../shared/data';
-import { beansDone, cornDone, scorePlayer, compostAvail, isPrepared, optionsFor, previewAction, turnDone } from '../shared/engine';
+import { SCORE_CAT_NAMES, beansDone, cornDone, scoreParts, scorePlayer, compostAvail, isPrepared, optionsFor, previewAction, turnDone, type ScoreCat } from '../shared/engine';
 import type { Action, GameState, Options, PlayerState, Target } from '../shared/types';
 import { FLOWER_COLORS, flower, goodsBadge, ic, rosette } from './icons';
 import { VERSION } from '../shared/version';
@@ -48,6 +48,7 @@ interface RoomInfo {
   hostId: string;
   started: boolean;
   locked?: boolean;
+  rematch?: { ready: string[]; waiting: string[] } | null;
   vote?: { by: string; byName: string; waiting: string[] } | null;
   members: { id: string; name: string; connected: boolean; bot?: boolean }[];
 }
@@ -78,6 +79,7 @@ let pendingScroll: string | null = null;
 let lastOptionsKey = '';
 let retry = 0;
 let showResults = true;
+let resultsPlayer = ''; // чей разбор очков показан на экране итогов
 interface RoomItem { code: string; host: string; players: number; max: number; started: boolean; locked: boolean; bots: number }
 let roomList: RoomItem[] = [];
 let myRoomPassword = ''; // пароль, который хозяин задал при создании (показываем ему, чтобы мог сообщить друзьям)
@@ -882,17 +884,41 @@ function renderBoard(): string {
 function renderResults(): string {
   const s = state!;
   const sc = s.scores!;
+  const best = Math.max(...sc.map((x) => x.total));
+  if (!s.players.some((p) => p.id === resultsPlayer)) resultsPlayer = s.winners[0] ?? s.players[0].id;
+  const cats: ScoreCat[] = ['garden', 'perennials', 'apiary', 'orchard', 'barn'];
   const rows = s.players
     .map((p, i) => {
       const x = sc[i];
-      return `<tr class="${s.winners.includes(p.id) ? 'win' : ''}"><td>${s.winners.includes(p.id) ? '🏆 ' : ''}${esc(p.name)}</td><td>${x.garden}</td><td>${x.perennials}</td><td>${x.apiary}</td><td>${x.orchard}</td><td>${x.barn}</td><td>${x.total}</td></tr>`;
+      const sel = p.id === resultsPlayer;
+      return `<tr class="${s.winners.includes(p.id) ? 'win' : ''} ${sel ? 'sel' : ''}" data-a="respl" data-v="${p.id}"><td>${s.winners.includes(p.id) ? '🏆 ' : ''}${esc(p.name)}${p.id === you ? ' <small>(вы)</small>' : ''}</td><td>${x.garden}</td><td>${x.perennials}</td><td>${x.apiary}</td><td>${x.orchard}</td><td>${x.barn}</td><td><b>${x.total}</b></td></tr>`;
     })
     .join('');
+  const pl = s.players.find((p) => p.id === resultsPlayer)!;
+  const parts = scoreParts(pl);
+  const idx = s.players.indexOf(pl);
+  const detail = cats
+    .map((c) => {
+      const tot = parts[c].reduce((a, b) => a + b.vp, 0);
+      const lines = parts[c]
+        .map((l) => `<div class="dl ${l.vp ? '' : 'zero'}"><span>${esc(l.label)}${l.note ? ` <small>${esc(l.note)}</small>` : ''}</span><b>${l.vp ? '+' + l.vp : '0'}</b></div>`)
+        .join('');
+      return `<div class="dcat"><div class="dh"><span>${SCORE_CAT_NAMES[c]}</span><b>${tot}</b></div>${lines || '<div class="dl zero"><span><small>ничего не набрано</small></span><b>0</b></div>'}</div>`;
+    })
+    .join('');
+  const gap = best - sc[idx].total;
   const win = s.winners.map(nameOf).join(' и ');
-  return `<div class="paper results-card"><h3 class="script">🏆 Победил${s.winners.length > 1 ? 'и' : ''}: ${esc(win)}</h3>
+  const rm = room?.rematch;
+  const ready = !!rm?.ready.includes(you);
+  const waitNames = (rm?.waiting ?? []).map((id) => esc(nameOf(id))).join(', ');
+  const rematchBtn = `<button class="btn block ${ready ? 'sec' : ''}" data-a="rematch">${ready ? '✔ Вы готовы к реваншу (нажмите, чтобы отменить)' : '🔁 Реванш'}</button>
+    <p class="legend" style="margin:4px 0 0;text-align:center">${rm && rm.ready.length ? `Готовы: ${rm.ready.map((id) => esc(nameOf(id))).join(', ')}${waitNames ? ` · ждём: ${waitNames}` : ''}` : 'Партия начнётся заново, когда нажмут все (боты согласны сразу). Первый ход перейдёт к другому игроку.'}</p>`;
+  return `<div class="paper results-card wide"><h3 class="script">🏆 Победил${s.winners.length > 1 ? 'и' : ''}: ${esc(win)}</h3>
     <table class="results"><thead><tr><th></th><th>Огород</th><th>Клумба</th><th>Пасека</th><th>Сад</th><th>Сарай</th><th>Итого</th></tr></thead><tbody>${rows}</tbody></table>
-    ${room?.hostId === you ? '<button class="btn block" style="margin-top:10px" data-a="restart">Новая партия в этой комнате</button>' : '<p class="legend">Хозяин комнаты может начать новую партию.</p>'}
-    <div class="row" style="margin-top:8px"><button class="btn sec" data-a="closeresults">Посмотреть планшеты</button><button class="btn sec" data-a="leave">Выйти</button></div></div>`;
+    <p class="legend" style="margin:6px 0">Нажмите на строку игрока, чтобы увидеть, из чего сложились его очки.</p>
+    <div class="detail"><h4 class="script" style="font-size:1.25rem;margin:0 0 6px">Разбор: ${esc(pl.name)} — ${sc[idx].total} ПО${gap > 0 ? ` <small>(−${gap} до лидера)</small>` : ''}</h4><div class="dgrid">${detail}</div></div>
+    <div style="margin-top:10px">${rematchBtn}</div>
+    <div class="row" style="margin-top:8px"><button class="btn sec" data-a="closeresults">Посмотреть планшеты</button>${room?.hostId === you ? '<button class="btn sec" data-a="restart">В комнату</button>' : ''}<button class="btn sec" data-a="leave">Выйти</button></div></div>`;
 }
 
 // ---------------------------------------------------------------------------
@@ -1281,6 +1307,11 @@ app.addEventListener('click', (ev) => {
     }
     case 'listrooms':
       return send({ type: 'listrooms' });
+    case 'respl':
+      resultsPlayer = v;
+      return render();
+    case 'rematch':
+      return send({ type: 'rematch' });
     case 'settings':
       return openSettings();
     case 'install': {

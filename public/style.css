@@ -748,3 +748,18 @@ main.fit.tall { height: auto; min-height: calc(100dvh - var(--hh)); overflow: vi
 .howto { margin: 4px 0 8px; padding-left: 22px; line-height: 1.35; font-size: 1rem; }
 .howto li { margin-bottom: 6px; }
 @media (display-mode: standalone) { body { overscroll-behavior: none; } }
+
+/* ---------- 4.0: подробные итоги и реванш ---------- */
+.results-card.wide { max-width: 760px; max-height: 92dvh; overflow-y: auto; }
+.results tr[data-a=respl] { cursor: pointer; }
+.results tr.sel td { box-shadow: inset 0 -3px 0 var(--green); background: #e6f4d2; }
+.results tr.win.sel td { background: #fff0a6; }
+.dgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 8px; }
+.dcat { background: #fffdf5; border: 2px solid #d9c9a0; border-radius: 10px; padding: 6px 10px 8px; }
+.dcat .dh { display: flex; justify-content: space-between; font-family: var(--script); font-size: 1.25rem; border-bottom: 2px solid #d9c9a0; margin-bottom: 4px; }
+.dcat .dh b { color: var(--green-d); }
+.dl { display: flex; justify-content: space-between; gap: 8px; font-size: .95rem; line-height: 1.2; padding: 1px 0; }
+.dl small { color: var(--muted); font-size: .78rem; }
+.dl b { flex: none; color: var(--green-d); }
+.dl.zero { opacity: .55; }
+.dl.zero b { color: var(--muted); }

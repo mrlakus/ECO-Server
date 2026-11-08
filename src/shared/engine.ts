@@ -822,34 +822,72 @@ function endRound(state: GameState, rng: Rng) {
 // Подсчёт очков
 // ---------------------------------------------------------------------------
 
-export function scorePlayer(p: PlayerState): Score {
-  const garden = cornDone(p) * 3 + beansDone(p) * 1;
+export interface ScorePart {
+  label: string;
+  note?: string; // пояснение (например «5/6 ячеек — не заполнен»)
+  vp: number;
+}
+export type ScoreCat = 'garden' | 'perennials' | 'apiary' | 'orchard' | 'barn';
+export type ScoreParts = Record<ScoreCat, ScorePart[]>;
+export const SCORE_CAT_NAMES: Record<ScoreCat, string> = { garden: 'Огород', perennials: 'Клумба', apiary: 'Пасека', orchard: 'Сад', barn: 'Сарай' };
 
-  let perennials = 0;
+/** Подробный разбор очков: каждая статья отдельной строкой. Итог scorePlayer считается из этих же строк. */
+export function scoreParts(p: PlayerState): ScoreParts {
+  const parts: ScoreParts = { garden: [], perennials: [], apiary: [], orchard: [], barn: [] };
+
+  const corn = cornDone(p);
+  const beans = beansDone(p);
+  parts.garden.push({ label: 'Кукуруза', note: `${corn} × 3`, vp: corn * 3 }, { label: 'Фасоль', note: `${beans} × 1`, vp: beans });
+
   PERENNIALS.forEach((c, i) => {
-    if (p.perennial[i] < PERENNIAL_CELLS) return;
-    perennials += c === 'tulip' ? Math.min(TULIP_VP_CAP, fruitHarvests(p)) : PERENNIAL_END_VP[c];
+    const filled = p.perennial[i];
+    const full = filled >= PERENNIAL_CELLS;
+    const vp = !full ? 0 : c === 'tulip' ? Math.min(TULIP_VP_CAP, fruitHarvests(p)) : PERENNIAL_END_VP[c];
+    const note = full ? (c === 'tulip' ? `сборов фруктов: ${fruitHarvests(p)} (максимум ${TULIP_VP_CAP})` : 'столбец заполнен') : `${filled}/${PERENNIAL_CELLS} — не заполнен`;
+    parts.perennials.push({ label: PERENNIAL_NAMES[c], note, vp });
   });
 
-  let apiary = 0;
-  APIARY_WAX.forEach((c, i) => {
-    if (i < p.wax && c.kind === 'c') apiary += c.vp;
-  });
-  APIARY_HONEY.forEach((c, i) => {
-    if (i < p.honey && c.kind === 'c') apiary += c.vp;
-  });
-  if (p.hive2 >= 1) apiary += HIVE2_VP;
+  const wax = APIARY_WAX.reduce((sum, c, i) => sum + (i < p.wax && c.kind === 'c' ? c.vp : 0), 0);
+  const honey = APIARY_HONEY.reduce((sum, c, i) => sum + (i < p.honey && c.kind === 'c' ? c.vp : 0), 0);
+  parts.apiary.push(
+    { label: 'Воск', note: `${p.wax}/${APIARY_WAX.length} ячеек`, vp: wax },
+    { label: 'Мёд', note: `${p.honey}/${APIARY_HONEY.length} ячеек`, vp: honey },
+    { label: 'Деление семьи', note: p.hive2 >= 1 ? 'начато' : 'не начато', vp: p.hive2 >= 1 ? HIVE2_VP : 0 },
+  );
 
-  let orchard = harvests(p, 'apple') * APPLE_VP + harvests(p, 'blackberry') * BLACKBERRY_VP;
+  const apple = harvests(p, 'apple');
+  const black = harvests(p, 'blackberry');
   const rb = harvests(p, 'raspberry');
-  for (const [at, vp] of Object.entries(RASPBERRY_VP_AT)) if (rb >= Number(at)) orchard += vp;
+  let rbVp = 0;
+  for (const [at, vp] of Object.entries(RASPBERRY_VP_AT)) if (rb >= Number(at)) rbVp += vp;
+  parts.orchard.push(
+    { label: 'Яблоки', note: `${apple} × ${APPLE_VP}`, vp: apple * APPLE_VP },
+    { label: 'Ежевика', note: `${black} × ${BLACKBERRY_VP}`, vp: black * BLACKBERRY_VP },
+    { label: 'Малина', note: `сборов: ${rb} (бонус за 3, 6 и 9-й)`, vp: rbVp },
+  );
 
-  let barn = 0;
-  for (const it of BARN_ITEMS) if (isPrepared(p, it)) barn += BARN[it].vp;
-  if (isPrepared(p, 'fruitbowl')) barn += FRUITBOWL_VP[GARDEN_ROWS.filter((r) => harvests(p, r) > 0).length];
-  if (isPrepared(p, 'casserole')) barn += Math.floor(beansDone(p) / 2);
-  if (isPrepared(p, 'carving')) barn += longestPumpkinChain(p);
+  for (const it of BARN_ITEMS) {
+    if (!isPrepared(p, it)) continue;
+    const d = BARN[it];
+    if (d.vp) parts.barn.push({ label: d.name, vp: d.vp });
+  }
+  if (isPrepared(p, 'fruitbowl')) {
+    const kinds = GARDEN_ROWS.filter((r) => harvests(p, r) > 0).length;
+    parts.barn.push({ label: BARN.fruitbowl.name, note: `разных видов: ${kinds}`, vp: FRUITBOWL_VP[kinds] });
+  }
+  if (isPrepared(p, 'casserole')) parts.barn.push({ label: BARN.casserole.name, note: `${beans} фасоли → за каждые 2`, vp: Math.floor(beans / 2) });
+  if (isPrepared(p, 'carving')) parts.barn.push({ label: BARN.carving.name, note: 'тыкв в самой длинной цепочке', vp: longestPumpkinChain(p) });
+  return parts;
+}
 
+export function scorePlayer(p: PlayerState): Score {
+  const parts = scoreParts(p);
+  const sum = (c: ScoreCat) => parts[c].reduce((x, y) => x + y.vp, 0);
+  const garden = sum('garden');
+  const perennials = sum('perennials');
+  const apiary = sum('apiary');
+  const orchard = sum('orchard');
+  const barn = sum('barn');
   return { garden, perennials, apiary, orchard, barn, total: garden + perennials + apiary + orchard + barn };
 }
 
