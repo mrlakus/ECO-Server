@@ -763,3 +763,25 @@ main.fit.tall { height: auto; min-height: calc(100dvh - var(--hh)); overflow: vi
 .dl b { flex: none; color: var(--green-d); }
 .dl.zero { opacity: .55; }
 .dl.zero b { color: var(--muted); }
+
+/* ---------- 4.1: образы игроков, зрители ---------- */
+.av { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 50%; background: #fff; border: 3px solid var(--c, #999); font-size: 1.05rem; line-height: 1; flex: none; box-shadow: 0 1px 3px rgba(0, 0, 0, .25); vertical-align: middle; }
+.av.sm { width: 22px; height: 22px; border-width: 2px; font-size: .8rem; }
+.av.big { width: 52px; height: 52px; border-width: 4px; font-size: 1.9rem; }
+.mylook { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
+.look { display: grid; gap: 8px; }
+.avs { display: grid; grid-template-columns: repeat(8, 1fr); gap: 5px; }
+.avb { aspect-ratio: 1; border-radius: 10px; border: 2px solid #d9c9a0; background: #fffdf5; font-size: 1.3rem; line-height: 1; padding: 0; }
+.avb.on { border-color: var(--green); background: #dff1c6; box-shadow: 0 0 0 2px var(--green); }
+.cls { display: flex; gap: 8px; flex-wrap: wrap; }
+.clb { width: 34px; height: 34px; border-radius: 50%; border: 3px solid #fff; background: var(--c); box-shadow: 0 0 0 2px #a89a78; padding: 0; }
+.clb.on { box-shadow: 0 0 0 3px var(--ink2); transform: scale(1.12); }
+.clb.taken { opacity: .25; cursor: not-allowed; }
+.pl { border-left: 6px solid var(--c, #d9c9a0); }
+.pl > b { flex: 1; min-width: 0; }
+.pbar button { border-color: var(--c, #b8a77f); }
+.pbar button.on { background: var(--c, var(--green)); color: #fff; border-color: var(--c, var(--green-d)); text-shadow: 0 1px 1px rgba(0, 0, 0, .4); }
+.rmb { display: flex; gap: 6px; flex: none; }
+.rm .rmb .btn.sec { padding: 0 10px; }
+.results td .av.sm { margin-right: 2px; }
+.cm .cmn .av.sm { margin-right: 2px; }

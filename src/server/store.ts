@@ -11,6 +11,8 @@ export interface SavedMember {
   token: string;
   name: string;
   bot?: boolean;
+  avatar?: string;
+  color?: string;
 }
 export interface SavedRoom {
   v: 1;

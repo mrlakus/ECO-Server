@@ -50,7 +50,9 @@ interface RoomInfo {
   locked?: boolean;
   rematch?: { ready: string[]; waiting: string[] } | null;
   vote?: { by: string; byName: string; waiting: string[] } | null;
-  members: { id: string; name: string; connected: boolean; bot?: boolean }[];
+  members: { id: string; name: string; connected: boolean; bot?: boolean; avatar?: string; color?: string }[];
+  spectators?: { id: string; name: string; avatar?: string; color?: string }[];
+  hidden?: boolean;
 }
 interface Session {
   code: string;
@@ -78,9 +80,22 @@ let selection: { bed: number; crops: string[]; max: number } | null = null;
 let pendingScroll: string | null = null;
 let lastOptionsKey = '';
 let retry = 0;
+const AVATARS = ['🧑‍🌾', '👩‍🌾', '🐝', '🐞', '🦋', '🐓', '🐄', '🐑', '🐷', '🐴', '🐇', '🦊', '🐸', '🦉', '🌻', '🍎'];
+const COLORS = ['#d9382a', '#2f7fb8', '#2e9b4a', '#e0a91d', '#8a4fc9', '#e8832a', '#14a39a', '#d94f8f'];
+interface Look { avatar: string; color: string }
+function loadLook(): Look {
+  try {
+    const l = JSON.parse(localStorage.getItem('ts-look') ?? 'null');
+    if (l && AVATARS.includes(l.avatar) && COLORS.includes(l.color)) return l;
+  } catch { /* нет сохранённого образа */ }
+  return { avatar: AVATARS[Math.floor(Math.random() * AVATARS.length)], color: COLORS[Math.floor(Math.random() * COLORS.length)] };
+}
+let look: Look = loadLook();
+localStorage.setItem('ts-look', JSON.stringify(look));
+let pendingSpectate = false;
 let showResults = true;
 let resultsPlayer = ''; // чей разбор очков показан на экране итогов
-interface RoomItem { code: string; host: string; players: number; max: number; started: boolean; locked: boolean; bots: number }
+interface RoomItem { code: string; host: string; players: number; max: number; started: boolean; locked: boolean; bots: number; spectators?: number }
 let roomList: RoomItem[] = [];
 let myRoomPassword = ''; // пароль, который хозяин задал при создании (показываем ему, чтобы мог сообщить друзьям)
 let pendingPwRoom = ''; // комната, в которую вводим пароль
@@ -143,7 +158,7 @@ function connect() {
     connected = true;
     firstUpdate = true;
     retry = 0;
-    if (session) send({ type: 'join', code: session.code, token: session.token, name: session.name });
+    if (session) send({ type: 'join', code: session.code, token: session.token, name: session.name, ...look });
     render();
   };
   ws.onmessage = (ev) => onMessage(JSON.parse(ev.data));
@@ -297,7 +312,7 @@ function onMessage(m: any) {
       }
       recompute();
       if (state?.phase !== 'over') showResults = true;
-      if (!viewId || !state?.players.some((p) => p.id === viewId)) viewId = you;
+      if (!viewId || !state?.players.some((p) => p.id === viewId)) viewId = state?.players.some((p) => p.id === you) ? you : (state?.players[0]?.id ?? you);
       const key = options ? JSON.stringify([options.kind, options.die, options.hint, state?.round, state?.phase]) : '';
       if (key !== lastOptionsKey) {
         lastOptionsKey = key;
@@ -374,6 +389,22 @@ const die = (v: number, size: '' | 'lg' | 'sm' | 'ghost' = '') =>
   `<span class="die ${size}" role="img" aria-label="кубик ${v}">${Array.from({ length: 9 }, (_, i) => `<i class="${PIPS[v].includes(i) ? 'p' : ''}"></i>`).join('')}</span>`;
 const cell = (kind: 's' | 'c', on: boolean, extra = '') => `<i class="cell ${kind}${on ? ' on' : ''} ${extra}"></i>`;
 const me = () => state?.players.find((p) => p.id === you) ?? null;
+/** Вы наблюдаете за игрой (вошли зрителем): ходить нельзя. */
+const isSpectator = () => !!room && !!room.spectators?.some((x) => x.id === you);
+/** Образ участника (игрока, бота или зрителя) по id. */
+function lookOf(id: string): { avatar: string; color: string } {
+  const m = room?.members.find((x) => x.id === id) ?? room?.spectators?.find((x) => x.id === id);
+  return { avatar: m?.avatar ?? '🙂', color: m?.color ?? '#999' };
+}
+const avBadge = (id: string, extra = '') => {
+  const l = lookOf(id);
+  return `<span class="av ${extra}" style="--c:${l.color}">${l.avatar}</span>`;
+};
+function lookPicker(): string {
+  const taken = new Set((room?.members ?? []).filter((m) => m.id !== you).map((m) => m.color));
+  return `<div class="look"><div class="avs">${AVATARS.map((a) => `<button class="avb ${a === look.avatar ? 'on' : ''}" data-a="avatar" data-v="${a}" aria-label="Аватарка">${a}</button>`).join('')}</div>
+    <div class="cls">${COLORS.map((c) => `<button class="clb ${c === look.color ? 'on' : ''} ${taken.has(c) ? 'taken' : ''}" data-a="color" data-v="${c}" style="--c:${c}" ${taken.has(c) ? 'disabled title="Цвет занят"' : ''} aria-label="Цвет"></button>`).join('')}</div></div>`;
+}
 const nameOf = (id: string) => state?.players.find((p) => p.id === id)?.name ?? '';
 let pendingName = '';
 const flowerOf = (c: string, on = true) => `<span class="fl ${on ? '' : 'off'}">${flower(FLOWER_COLORS[c])}</span>`;
@@ -489,14 +520,31 @@ function reactToUpdate(prev: GameState | null, next: GameState | null) {
   if (any) markFresh(prev);
 }
 
-function joinRoom(code: string, locked: boolean, password = '') {
+/** Перерисовка меню без потери того, что пользователь уже ввёл (имя, пароли, код, галочка «скрытая»). */
+function renderKeepingInputs() {
+  const ids = ['name', 'roompw', 'code', 'joinpw'];
+  const vals = ids.map((i) => (document.getElementById(i) as HTMLInputElement | null)?.value ?? null);
+  const hidden = (document.getElementById('roomhidden') as HTMLInputElement | null)?.checked ?? false;
+  const focus = document.activeElement?.id;
+  render();
+  ids.forEach((i, k) => {
+    const el = document.getElementById(i) as HTMLInputElement | null;
+    if (el && vals[k] !== null && vals[k] !== '') el.value = vals[k]!;
+  });
+  const hc = document.getElementById('roomhidden') as HTMLInputElement | null;
+  if (hc) hc.checked = hidden;
+  if (focus) (document.getElementById(focus) as HTMLInputElement | null)?.focus();
+}
+
+function joinRoom(code: string, locked: boolean, password = '', spectate = pendingSpectate) {
+  pendingSpectate = spectate;
   const name = (document.getElementById('name') as HTMLInputElement | null)?.value.trim() || session?.name || localStorage.getItem('ts-name') || '';
   if (!name) return toast('Введите имя (в поле «Ваше имя»)');
   localStorage.setItem('ts-name', name);
   pendingName = name;
   session = { code: '', token: '', name };
   if (locked && !password) return openPasswordModal(code);
-  send({ type: 'join', code, name, password });
+  send({ type: 'join', code, name, password, spectate: pendingSpectate, ...look });
 }
 // ---------------------------------------------------------------------------
 // Чат и реакции (панель живёт вне #app, поэтому не пропадает при перерисовке)
@@ -508,8 +556,8 @@ function chatHtmlList(): string {
     .map((m) => {
       const mine = m.from === you;
       return m.kind === 'react'
-        ? `<div class="cm react ${mine ? 'mine' : ''}"><span class="cmn">${esc(m.name)}</span> ${esc(m.text)}</div>`
-        : `<div class="cm ${mine ? 'mine' : ''}"><span class="cmn">${mine ? 'Вы' : esc(m.name)} <i>${hhmm(m.at)}</i></span><span class="cmt">${esc(m.text)}</span></div>`;
+        ? `<div class="cm react ${mine ? 'mine' : ''}"><span class="cmn">${avBadge(m.from, 'sm')} ${esc(m.name)}</span> ${esc(m.text)}</div>`
+        : `<div class="cm ${mine ? 'mine' : ''}" style="border-left:5px solid ${lookOf(m.from).color}"><span class="cmn">${avBadge(m.from, 'sm')} ${mine ? 'Вы' : esc(m.name)} <i>${hhmm(m.at)}</i></span><span class="cmt">${esc(m.text)}</span></div>`;
     })
     .join('');
 }
@@ -623,7 +671,7 @@ document.addEventListener('click', (e) => {
     const pw = (document.getElementById('modalpw') as HTMLInputElement).value.trim();
     if (!pw) return toast('Введите пароль');
     const code = pendingPwRoom;
-    joinRoom(code, true, pw);
+    joinRoom(code, true, pw, pendingSpectate);
   }
 });
 document.addEventListener('change', async (e) => {
@@ -684,7 +732,9 @@ function renderLobby(): string {
     ${windowWrap(`
     <div class="paper"><h3 class="script">Ваше имя</h3>
       <input type="text" id="name" maxlength="20" placeholder="Например, Алексей" value="${esc(saved)}" autocomplete="nickname"></div>
+    <div class="paper"><h3 class="script">Ваш образ</h3><div class="mylook">${avBadge('', 'big').replace('--c:#999', '--c:' + look.color).replace('🙂', look.avatar)}<span class="legend" style="margin:0">Аватарка и цвет — как вас увидят другие игроки</span></div>${lookPicker()}</div>
     <div class="paper"><h3 class="script">Новая комната</h3>
+      <label class="setrow" style="border:0;padding:0 0 8px"><input type="checkbox" id="roomhidden"><span>Скрытая комната<small>не показывается в списке, вход только по коду</small></span></label>
       <input type="text" id="roompw" maxlength="32" placeholder="Пароль комнаты (необязательно)" autocomplete="off" style="margin-bottom:8px">
       <button class="btn block" data-a="create">Создать комнату</button></div>
     <div class="paper"><h3 class="script">Подключиться к другу</h3>
@@ -702,11 +752,13 @@ function renderLobby(): string {
 function renderRoomList(): string {
   if (!roomList.length) return '<p class="legend" style="margin:0">Пока нет открытых комнат. Создайте свою!</p>';
   return roomList
-    .map(
-      (r) => `<div class="rm ${r.started ? 'busy' : ''}"><div class="rmi"><b>${r.locked ? '🔒 ' : ''}Комната ${esc(r.host)}</b>
-      <small>${r.players}/${r.max}${r.bots ? ` · ботов: ${r.bots}` : ''} · ${r.started ? 'идёт игра' : 'ждут игроков'} · код ${esc(r.code)}</small></div>
-      <button class="btn" data-a="joinroom" data-code="${esc(r.code)}" data-locked="${r.locked}" ${r.started || r.players >= r.max ? 'disabled' : ''}>Войти</button></div>`,
-    )
+    .map((r) => {
+      const full = r.started || r.players >= r.max;
+      return `<div class="rm ${r.started ? 'busy' : ''}"><div class="rmi"><b>${r.locked ? '🔒 ' : ''}Комната ${esc(r.host)}</b>
+      <small>${r.players}/${r.max}${r.bots ? ` · ботов: ${r.bots}` : ''}${r.spectators ? ` · 👁 ${r.spectators}` : ''} · ${r.started ? 'идёт игра' : 'ждут игроков'} · код ${esc(r.code)}</small></div>
+      <div class="rmb"><button class="btn" data-a="joinroom" data-code="${esc(r.code)}" data-locked="${r.locked}" ${full ? 'disabled' : ''}>Войти</button>
+      <button class="btn sec" data-a="spectate" data-code="${esc(r.code)}" data-locked="${r.locked}" title="Наблюдать за игрой">👁</button></div></div>`;
+    })
     .join('');
 }
 
@@ -723,21 +775,25 @@ function renderRoom(): string {
       ${r.locked ? `<p class="legend" style="text-align:center;margin:0 0 8px">🔒 Комната с паролем${isHost && myRoomPassword ? `: <b>${esc(myRoomPassword)}</b>` : ''}</p>` : ''}
       <div class="row"><button class="btn sec" data-a="copy" data-v="${esc(link)}">Скопировать ссылку</button>
       ${typeof navigator.share === 'function' ? `<button class="btn sec" data-a="share" data-v="${esc(link)}">Поделиться</button>` : ''}</div></div>
+    ${isSpectator() ? '' : `<div class="paper"><h3 class="script">Ваш образ</h3>${lookPicker()}</div>`}
     <div class="paper"><h3 class="script">Игроки (${r.members.length}/${MAX_PLAYERS})</h3>
       <ul class="members">
         ${r.members
           .map(
             (m) =>
-              `<li><span class="dot ${m.connected ? 'on' : ''}"></span>${esc(m.name)}${m.id === you ? ' <small>(вы)</small>' : ''}${m.id === r.hostId ? '<span class="badge">хозяин</span>' : ''}${m.bot && isHost ? `<button class="btn sec" data-a="removebot" data-v="${m.id}" style="flex:none;min-height:32px;padding:0 10px;margin-left:auto">✕</button>` : ''}</li>`,
+              `<li>${avBadge(m.id)}<span class="dot ${m.connected ? 'on' : ''}"></span>${esc(m.name)}${m.id === you ? ' <small>(вы)</small>' : ''}${m.id === r.hostId ? '<span class="badge">хозяин</span>' : ''}${m.bot && isHost ? `<button class="btn sec" data-a="removebot" data-v="${m.id}" style="flex:none;min-height:32px;padding:0 10px;margin-left:auto">✕</button>` : ''}</li>`,
           )
           .join('')}
       </ul>
+      ${r.spectators?.length ? `<p class="legend" style="margin:8px 0 0">👁 Зрители: ${r.spectators.map((x) => `${avBadge(x.id, 'sm')} ${esc(x.name)}`).join(', ')}</p>` : ''}
       ${isHost && r.members.length < MAX_PLAYERS ? '<button class="btn sec block" style="margin-top:10px" data-a="addbot">🤖 Добавить бота</button>' : ''}
     </div>
     ${
       isHost
         ? `<button class="btn block" data-a="start" ${r.members.length < MIN_PLAYERS ? 'disabled' : ''}>${r.members.length < MIN_PLAYERS ? 'Ждём ещё игроков…' : 'Начать игру'}</button>`
-        : '<div class="hint">Ждём, пока хозяин комнаты начнёт игру…</div>'
+        : isSpectator()
+          ? '<div class="hint">👁 Вы наблюдаете. Когда хозяин начнёт игру, вы увидите партию.</div>'
+          : '<div class="hint">Ждём, пока хозяин комнаты начнёт игру…</div>'
     }`)}
     <button class="btn sec block" data-a="leave">Выйти из комнаты</button>
   </div>`;
@@ -754,7 +810,7 @@ function renderGame(): string {
     <span class="ev">${phaseName}${connected ? '' : ' · ⚠ нет связи'}</span>
     <span class="ver" title="Версия приложения">v${VERSION}</span>
     <button class="hbtn gearbtn" data-a="settings" title="Настройки">⚙</button>
-    ${over ? '' : '<button class="hbtn" data-a="proposeend" title="Предложить всем закончить игру и выйти в меню">🏳 <span>Закончить игру</span></button>'}
+    ${over || isSpectator() ? '' : '<button class="hbtn" data-a="proposeend" title="Предложить всем закончить игру и выйти в меню">🏳 <span>Закончить игру</span></button>'}
     ${document.fullscreenEnabled ? `<button class="fs" data-a="fullscreen" title="На весь экран">${document.fullscreenElement ? '✕' : '⛶'}</button>` : ''}
     <nav class="tabs">
       <button data-a="tab" data-v="board" class="${tab === 'board' ? 'on' : ''}">Поле</button>
@@ -862,7 +918,7 @@ function renderBoard(): string {
     .map((p) => {
       const sc = scorePlayer(p);
       const turn = active === p || (s.phase !== 'pick' && p.tasks.length > 0);
-      return `<button class="pl ${turn ? 'turn' : ''}" data-a="viewsheet" data-v="${p.id}"><b>${esc(p.name)}${p.id === you ? ' (вы)' : ''}</b>
+      return `<button class="pl ${turn ? 'turn' : ''}" data-a="viewsheet" data-v="${p.id}" style="--c:${lookOf(p.id).color}">${avBadge(p.id)}<b>${esc(p.name)}${p.id === you ? ' (вы)' : ''}</b>
         <span class="stat"><span class="st">${ic.crate}${p.goods}</span><span class="st">${ic.compost}${compostAvail(p)}</span><span class="st sc">≈${sc.total}</span></span></button>`;
     })
     .join('');
@@ -891,7 +947,7 @@ function renderResults(): string {
     .map((p, i) => {
       const x = sc[i];
       const sel = p.id === resultsPlayer;
-      return `<tr class="${s.winners.includes(p.id) ? 'win' : ''} ${sel ? 'sel' : ''}" data-a="respl" data-v="${p.id}"><td>${s.winners.includes(p.id) ? '🏆 ' : ''}${esc(p.name)}${p.id === you ? ' <small>(вы)</small>' : ''}</td><td>${x.garden}</td><td>${x.perennials}</td><td>${x.apiary}</td><td>${x.orchard}</td><td>${x.barn}</td><td><b>${x.total}</b></td></tr>`;
+      return `<tr class="${s.winners.includes(p.id) ? 'win' : ''} ${sel ? 'sel' : ''}" data-a="respl" data-v="${p.id}"><td>${s.winners.includes(p.id) ? '🏆 ' : ''}${avBadge(p.id, 'sm')} ${esc(p.name)}${p.id === you ? ' <small>(вы)</small>' : ''}</td><td>${x.garden}</td><td>${x.perennials}</td><td>${x.apiary}</td><td>${x.orchard}</td><td>${x.barn}</td><td><b>${x.total}</b></td></tr>`;
     })
     .join('');
   const pl = s.players.find((p) => p.id === resultsPlayer)!;
@@ -917,7 +973,7 @@ function renderResults(): string {
     <table class="results"><thead><tr><th></th><th>Огород</th><th>Клумба</th><th>Пасека</th><th>Сад</th><th>Сарай</th><th>Итого</th></tr></thead><tbody>${rows}</tbody></table>
     <p class="legend" style="margin:6px 0">Нажмите на строку игрока, чтобы увидеть, из чего сложились его очки.</p>
     <div class="detail"><h4 class="script" style="font-size:1.25rem;margin:0 0 6px">Разбор: ${esc(pl.name)} — ${sc[idx].total} ПО${gap > 0 ? ` <small>(−${gap} до лидера)</small>` : ''}</h4><div class="dgrid">${detail}</div></div>
-    <div style="margin-top:10px">${rematchBtn}</div>
+    ${isSpectator() ? '<p class="legend" style="margin-top:8px;text-align:center">👁 Вы наблюдали за этой партией.</p>' : `<div style="margin-top:10px">${rematchBtn}</div>`}
     <div class="row" style="margin-top:8px"><button class="btn sec" data-a="closeresults">Посмотреть планшеты</button>${room?.hostId === you ? '<button class="btn sec" data-a="restart">В комнату</button>' : ''}<button class="btn sec" data-a="leave">Выйти</button></div></div>`;
 }
 
@@ -1064,7 +1120,7 @@ function targetMap(): Map<string, number | undefined> {
 
 function renderSheet(): string {
   const s = state!;
-  const p = s.players.find((x) => x.id === viewId) ?? me()!;
+  const p = s.players.find((x) => x.id === viewId) ?? me() ?? s.players[0];
   const mineView = p.id === you;
   const tmap = mineView ? targetMap() : new Map<string, number | undefined>();
   const hot = (area: string, target: string) => tmap.has(`${area}:${target}`);
@@ -1078,7 +1134,7 @@ function renderSheet(): string {
   const planX = (j: number, f0: number, f: number) => (j >= f0 && j < f ? markCls : '');
 
   const chips = s.players
-    .map((x) => `<button class="${x.id === p.id ? 'on' : ''}" data-a="view" data-v="${x.id}">${esc(x.name)}${x.id === you ? ' (я)' : ''}</button>`)
+    .map((x) => `<button class="${x.id === p.id ? 'on' : ''}" data-a="view" data-v="${x.id}" style="--c:${lookOf(x.id).color}">${avBadge(x.id, 'sm')} ${esc(x.name)}${x.id === you ? ' (я)' : ''}</button>`)
     .join('');
 
   // ---- Огород ----
@@ -1222,6 +1278,11 @@ function renderSheet(): string {
 // ---------------------------------------------------------------------------
 
 function renderDock(): string {
+  if (isSpectator()) {
+    const s0 = state!;
+    const turnName = s0.phase === 'pick' ? s0.players[(s0.first + s0.pickPos) % s0.players.length].name : '';
+    return `<div class="dock"><div class="dtext"><span>👁 Вы наблюдаете за игрой${turnName ? ` · сейчас ходит ${esc(turnName)}` : ''}${s0.phase === 'over' ? ' · партия окончена' : ''}</span></div><div class="dbtns"><button class="chip" data-a="leave">Выйти</button></div></div>`;
+  }
   const o = options;
   const s = state!;
   const over = s.phase === 'over';
@@ -1296,15 +1357,27 @@ app.addEventListener('click', (ev) => {
       if (a === 'create') {
         const password = (document.getElementById('roompw') as HTMLInputElement | null)?.value.trim() ?? '';
         myRoomPassword = password;
-        send({ type: 'create', name, password });
+        const hidden = (document.getElementById('roomhidden') as HTMLInputElement | null)?.checked ?? false;
+        send({ type: 'create', name, password, hidden, ...look });
       } else {
         const code = (document.getElementById('code') as HTMLInputElement).value.trim().toUpperCase();
         if (code.length < 4) return toast('Введите код комнаты');
         const password = (document.getElementById('joinpw') as HTMLInputElement | null)?.value.trim() ?? '';
-        send({ type: 'join', code, name, password });
+        pendingSpectate = false;
+        send({ type: 'join', code, name, password, ...look });
       }
       return;
     }
+    case 'avatar':
+    case 'color': {
+      look = { ...look, [a === 'avatar' ? 'avatar' : 'color']: v };
+      localStorage.setItem('ts-look', JSON.stringify(look));
+      if (room) send({ type: 'profile', ...look });
+      else renderKeepingInputs();
+      return;
+    }
+    case 'spectate':
+      return joinRoom(el.dataset.code!, el.dataset.locked === 'true', '', true);
     case 'listrooms':
       return send({ type: 'listrooms' });
     case 'respl':
@@ -1334,7 +1407,7 @@ app.addEventListener('click', (ev) => {
         <button class="btn block" data-a="closemodal">Понятно</button></div></div>`;
       return;
     case 'joinroom': {
-      return joinRoom(el.dataset.code!, el.dataset.locked === 'true');
+      return joinRoom(el.dataset.code!, el.dataset.locked === 'true', '', false);
     }
     case 'start':
       return send({ type: 'start' });

@@ -102,3 +102,12 @@ test('выбор хранилища по настройкам окружения
   assert.equal(createStore({ RENDER: 'true' } as NodeJS.ProcessEnv).kind, 'off', 'на Render без базы — не притворяемся, что сохраняем');
   assert.equal(createStore({} as NodeJS.ProcessEnv).kind, 'file');
 });
+
+test('сохранённый участник без аватарки (старые сохранения) загружается без ошибок', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'ts-store-'));
+  const store = new FileStore(dir);
+  const old = sampleRoom('OLDAV');
+  await store.save(old);
+  const [back] = await store.loadAll();
+  assert.ok(back.members.every((m) => m.avatar === undefined || typeof m.avatar === 'string'));
+});

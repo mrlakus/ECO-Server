@@ -25,7 +25,13 @@ interface Member {
   socket: WebSocket | null;
   bot?: boolean;
   chatTimes?: number[];
+  avatar: string;
+  color: string;
+  spectator?: boolean;
 }
+export const AVATARS = ['🧑‍🌾', '👩‍🌾', '🐝', '🐞', '🦋', '🐓', '🐄', '🐑', '🐷', '🐴', '🐇', '🦊', '🐸', '🦉', '🌻', '🍎'];
+export const COLORS = ['#d9382a', '#2f7fb8', '#2e9b4a', '#e0a91d', '#8a4fc9', '#e8832a', '#14a39a', '#d94f8f'];
+const MAX_SPECTATORS = 8;
 interface Room {
   code: string;
   hostId: string;
@@ -40,6 +46,8 @@ interface Room {
   pw?: { salt: string; hash: string }; // пароль комнаты (хранится только хеш)
   pwFails: number[]; // времена неудачных попыток ввода пароля
   rematch?: Set<string>; // кто уже нажал «Реванш»
+  hidden?: boolean; // скрытая комната: не показывается в списке, вход по коду
+  spectators: Member[];
   chat: ChatMsg[];
   chatSeq: number;
 }
@@ -67,7 +75,7 @@ const snapshot = (room: Room): SavedRoom => ({
   v: 1,
   code: room.code,
   hostId: room.hostId,
-  members: room.members.map((m) => ({ id: m.id, token: m.token, name: m.name, bot: m.bot })),
+  members: room.members.map((m) => ({ id: m.id, token: m.token, name: m.name, bot: m.bot, avatar: m.avatar, color: m.color })),
   game: room.game,
   pw: room.pw,
   chat: room.chat,
@@ -101,7 +109,8 @@ async function restoreRooms() {
       const room: Room = {
         code: r.code,
         hostId: r.hostId,
-        members: r.members.map((m) => ({ ...m, socket: null })),
+        members: r.members.map((m, i) => ({ ...m, socket: null, avatar: m.avatar ?? (m.bot ? '🤖' : AVATARS[i % AVATARS.length]), color: m.color ?? COLORS[i % COLORS.length] })),
+        spectators: [],
         game: r.game,
         touched: Date.now(),
         lastDecline: {},
@@ -117,6 +126,17 @@ async function restoreRooms() {
     slog(`не удалось восстановить комнаты: ${e instanceof Error ? e.message : e}`);
   }
 }
+
+// ---------- Образ игрока (аватарка и цвет) ----------
+/** Подбирает допустимый образ: аватарка из списка, цвет — желаемый, если он свободен, иначе первый свободный. */
+function pickLook(room: Room | null, want: { avatar?: unknown; color?: unknown }, self?: Member) {
+  const avatar = typeof want.avatar === 'string' && AVATARS.includes(want.avatar) ? want.avatar : AVATARS[randomInt(AVATARS.length)];
+  const used = new Set((room?.members ?? []).filter((m) => m !== self).map((m) => m.color));
+  let color = typeof want.color === 'string' && COLORS.includes(want.color) && !used.has(want.color) ? want.color : '';
+  if (!color) color = COLORS.find((c) => !used.has(c)) ?? COLORS[0];
+  return { avatar, color };
+}
+const allMembers = (room: Room) => [...room.members, ...room.spectators];
 
 // ---------- Пароль комнаты ----------
 const hashPw = (pw: string) => {
@@ -135,6 +155,8 @@ const stamp = () => new Date().toISOString().replace('T', ' ').slice(0, 19);
 export const slog = (msg: string) => console.log(`[${stamp()}] ${msg}`);
 function deleteRoom(room: Room, why: string) {
   if (!rooms.delete(room.code)) return;
+  room.closed = true;
+  for (const m of room.spectators) send(m.socket, { type: 'ended', message: 'Комната закрыта' });
   unpersist(room.code);
   scheduleRoomList();
   slog(`комната ${room.code} закрыта: ${why}`);
@@ -167,12 +189,15 @@ function publicRoom(room: Room) {
     locked: !!room.pw,
     rematch: room.game?.phase === 'over' ? { ready: [...(room.rematch ?? [])], waiting: rematchWaiting(room) } : null,
     vote: room.vote ? { by: room.vote.by, byName: nameOf(room, room.vote.by), waiting: waitingIds(room) } : null,
-    members: room.members.map((m) => ({ id: m.id, name: m.name, connected: !!m.bot || !!m.socket, bot: !!m.bot })),
+    hidden: !!room.hidden,
+    members: room.members.map((m) => ({ id: m.id, name: m.name, connected: !!m.bot || !!m.socket, bot: !!m.bot, avatar: m.avatar, color: m.color })),
+    spectators: room.spectators.map((m) => ({ id: m.id, name: m.name, avatar: m.avatar, color: m.color })),
   };
 }
 
 // ---------- Список открытых комнат ----------
 interface RoomItem {
+  spectators: number;
   code: string;
   host: string;
   players: number;
@@ -184,8 +209,9 @@ interface RoomItem {
 function roomList(): RoomItem[] {
   const items: (RoomItem & { at: number })[] = [];
   for (const r of rooms.values()) {
-    if (r.closed || !r.members.some((m) => !m.bot && m.socket)) continue; // комнаты без людей онлайн не показываем
+    if (r.closed || r.hidden || !r.members.some((m) => !m.bot && m.socket)) continue; // скрытые и пустые комнаты не показываем
     items.push({
+      spectators: r.spectators.filter((m) => m.socket).length,
       code: r.code,
       host: r.members.find((m) => m.id === r.hostId)?.name ?? '?',
       players: r.members.length,
@@ -223,12 +249,12 @@ function broadcast(room: Room) {
     slog(`комната ${room.code}: партия окончена — победитель: ${g.winners.map((id) => g.players.find((p) => p.id === id)?.name).join(' и ')}; счёт: ${table}`);
   }
   const pub = publicRoom(room);
-  for (const m of room.members) {
+  for (const m of allMembers(room)) {
     if (!m.socket) continue;
     const msg: Record<string, unknown> = { type: 'update', room: pub, you: m.id };
     if (room.game) {
       msg.state = room.game;
-      msg.options = optionsFor(room.game, m.id);
+      if (!m.spectator) msg.options = optionsFor(room.game, m.id);
     }
     send(m.socket, msg);
   }
@@ -354,17 +380,19 @@ function handle(ws: WebSocket, conn: Conn, raw: string) {
   if (!msg || typeof msg.type !== 'string') return;
   const err = (message: string) => send(ws, { type: 'error', message });
   if (conn.room?.closed && msg.type !== 'ping' && msg.type !== 'create' && msg.type !== 'join') return err('Стол закрыт');
+  if (conn.member?.spectator && ['action', 'batch', 'start', 'addbot', 'removebot', 'restart', 'proposeend', 'voteend', 'cancelend', 'rematch'].includes(msg.type)) return err('Зрители не могут этого делать');
 
   switch (msg.type) {
     case 'create': {
       const name = cleanName(msg.name);
       if (!name) return err('Введите имя');
-      const member: Member = { id: newId(), token: randomBytes(16).toString('hex'), name, socket: null };
-      const room: Room = { code: newCode(), hostId: member.id, members: [member], game: null, touched: Date.now(), lastDecline: {}, pwFails: [], chat: [], chatSeq: 0 };
+      const member: Member = { id: newId(), token: randomBytes(16).toString('hex'), name, socket: null, ...pickLook(null, msg) };
+      const room: Room = { code: newCode(), hostId: member.id, members: [member], game: null, touched: Date.now(), lastDecline: {}, pwFails: [], chat: [], chatSeq: 0, spectators: [] };
       const password = typeof msg.password === 'string' ? msg.password.trim().slice(0, 32) : '';
       if (password) room.pw = hashPw(password);
+      if (msg.hidden === true) room.hidden = true;
       rooms.set(room.code, room);
-      slog(`комната ${room.code} создана: хозяин «${name}»${room.pw ? ', с паролем' : ''}`);
+      slog(`комната ${room.code} создана: хозяин «${name}»${room.pw ? ', с паролем' : ''}${room.hidden ? ', скрытая' : ''}`);
       attach(ws, conn, room, member);
       return;
     }
@@ -372,13 +400,15 @@ function handle(ws: WebSocket, conn: Conn, raw: string) {
       const room = rooms.get(String(msg.code ?? '').toUpperCase().trim());
       if (!room) return err('Комната не найдена');
       // Переподключение по токену
-      const existing = room.members.find((m) => m.token === msg.token);
+      const existing = allMembers(room).find((m) => m.token === msg.token);
       if (existing) {
-        slog(`комната ${room.code}: «${existing.name}» вернулся (переподключение)`);
+        slog(`комната ${room.code}: «${existing.name}» вернулся (переподключение)${existing.spectator ? ' [зритель]' : ''}`);
         return attach(ws, conn, room, existing);
       }
-      if (room.game) return err('Игра уже началась');
-      if (room.members.length >= MAX_PLAYERS) return err('Комната заполнена');
+      const spectate = msg.spectate === true;
+      if (!spectate && room.game) return err('Игра уже началась — можно войти зрителем');
+      if (!spectate && room.members.length >= MAX_PLAYERS) return err('Комната заполнена — можно войти зрителем');
+      if (spectate && room.spectators.length >= MAX_SPECTATORS) return err('Слишком много зрителей');
       if (room.pw) {
         const given = typeof msg.password === 'string' ? msg.password : '';
         if (!given) return send(ws, { type: 'error', code: 'password_required', room: room.code, message: 'Комната защищена паролем' });
@@ -393,8 +423,16 @@ function handle(ws: WebSocket, conn: Conn, raw: string) {
       }
       const name = cleanName(msg.name);
       if (!name) return err('Введите имя');
-      if (room.members.some((m) => m.name.toLowerCase() === name.toLowerCase())) return err('Такое имя уже занято в комнате');
-      const member: Member = { id: newId(), token: randomBytes(16).toString('hex'), name, socket: null };
+      if (allMembers(room).some((m) => m.name.toLowerCase() === name.toLowerCase())) return err('Такое имя уже занято в комнате');
+      if (spectate) {
+        const look = pickLook(null, msg);
+        const sp: Member = { id: newId(), token: randomBytes(16).toString('hex'), name, socket: null, spectator: true, ...look };
+        room.spectators.push(sp);
+        slog(`комната ${room.code}: «${name}» наблюдает (зрителей: ${room.spectators.length})`);
+        attach(ws, conn, room, sp);
+        return;
+      }
+      const member: Member = { id: newId(), token: randomBytes(16).toString('hex'), name, socket: null, ...pickLook(room, msg) };
       room.members.push(member);
       slog(`комната ${room.code}: «${name}» вошёл (игроков: ${room.members.length})`);
       attach(ws, conn, room, member);
@@ -497,7 +535,7 @@ function handle(ws: WebSocket, conn: Conn, raw: string) {
       if (room.game) return err('Игра уже идёт');
       if (room.members.length >= MAX_PLAYERS) return err('Комната заполнена');
       const nBots = room.members.filter((m) => m.bot).length;
-      room.members.push({ id: newId(), token: randomBytes(16).toString('hex'), name: nBots ? `🤖 Бот ${nBots + 1}` : '🤖 Бот', socket: null, bot: true });
+      room.members.push({ id: newId(), token: randomBytes(16).toString('hex'), name: nBots ? `🤖 Бот ${nBots + 1}` : '🤖 Бот', socket: null, bot: true, avatar: '🤖', color: pickLook(room, {}).color });
       broadcast(room);
       return;
     }
@@ -535,8 +573,11 @@ function handle(ws: WebSocket, conn: Conn, raw: string) {
     case 'leave': {
       const { room, member } = conn;
       if (!room || !member) return;
-      slog(`комната ${room.code}: «${member.name}» вышел`);
-      if (!room.game) {
+      slog(`комната ${room.code}: «${member.name}» вышел${member.spectator ? ' [зритель]' : ''}`);
+      if (member.spectator) {
+        room.spectators = room.spectators.filter((m) => m !== member);
+        broadcast(room);
+      } else if (!room.game) {
         room.members = room.members.filter((m) => m !== member);
         if (room.hostId === member.id && humans(room).length) room.hostId = humans(room)[0].id;
         if (!humans(room).length) deleteRoom(room, 'все вышли');
@@ -572,8 +613,17 @@ function handle(ws: WebSocket, conn: Conn, raw: string) {
       const m: ChatMsg = { id: ++room.chatSeq, from: member.id, name: member.name, text, kind, at: now };
       room.chat.push(m);
       if (room.chat.length > 100) room.chat.splice(0, room.chat.length - 100);
-      for (const mm of room.members) send(mm.socket, { type: 'chat', msg: m });
+      for (const mm of allMembers(room)) send(mm.socket, { type: 'chat', msg: m });
       persist(room);
+      return;
+    }
+    case 'profile': {
+      const { room, member } = conn;
+      if (!room || !member) return;
+      const look = member.spectator ? pickLook(null, msg) : pickLook(room, msg, member);
+      member.avatar = look.avatar;
+      member.color = look.color;
+      broadcast(room);
       return;
     }
     case 'listrooms':
@@ -651,9 +701,17 @@ wss.on('connection', (ws) => {
     const { room, member } = conn;
     if (room && member && member.socket === ws) {
       member.socket = null;
-      slog(`комната ${room.code}: «${member.name}» отключился`);
+      slog(`комната ${room.code}: «${member.name}» отключился${member.spectator ? ' [зритель]' : ''}`);
+      if (member.spectator) {
+        // зритель, не вернувшийся за 2 минуты, убирается из списка
+        setTimeout(() => {
+          if (member.socket || !rooms.has(room.code)) return;
+          room.spectators = room.spectators.filter((m) => m !== member);
+          broadcast(room);
+        }, 120000).unref();
+      }
       // В лобби отключившийся игрок остаётся 2 минуты на переподключение
-      if (!room.game) {
+      else if (!room.game) {
         setTimeout(() => {
           if (member.socket || !rooms.has(room.code) || room.game) return;
           room.members = room.members.filter((m) => m !== member);
