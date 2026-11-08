@@ -602,13 +602,23 @@ function renderSheet(): string {
   // Кольцо тыкв идёт по контуру огорода, но каждая тыква лежит внутри своей грядки — у её внешнего края.
   // p<N> — тыква, s<N> — цветок между тыквами N и N+1. Порядок — по часовой стрелке.
   const STRIPS: Record<number, { top?: string[]; bottom?: string[]; left?: string[]; right?: string[] }> = {
-    1: { top: ['p0', 's11'], left: ['s0', 'p1', 's1', 'p2', 's2'] },
-    2: { top: ['p11', 's10'] },
-    3: { top: ['p10', 's9'], right: ['p9', 's8'] },
-    4: { right: ['p8', 's7', 'p7', 's6'], bottom: ['s5', 'p6'] },
-    5: { bottom: ['s4', 'p5'] },
+    1: { top: ['p0'], left: ['s0', 'p1', 's1', 'p2'] },
+    2: { top: ['p11'] },
+    3: { top: ['p10', 's9'], right: ['p9'] },
+    4: { right: ['p8', 's7', 'p7', 's6'], bottom: ['p6'] },
+    5: { bottom: ['p5'] },
     6: { left: ['p3'], bottom: ['s3', 'p4'] },
   };
+  // Цветы между тыквами из РАЗНЫХ грядок лежат снаружи — в промежутках между грядками.
+  const GAPS: { sym: number; cls: string; kind: 'v' | 'h' }[] = [
+    { sym: 11, cls: 'g11', kind: 'v' }, // между грядками 1 и 2 (сверху)
+    { sym: 10, cls: 'g10', kind: 'v' }, // между 2 и 3 (сверху)
+    { sym: 2, cls: 'g2', kind: 'h' }, // между 1 и 6 (слева)
+    { sym: 8, cls: 'g8', kind: 'h' }, // между 3 и 4 (справа)
+    { sym: 4, cls: 'g4', kind: 'v' }, // между 6 и 5 (снизу)
+    { sym: 5, cls: 'g5', kind: 'v' }, // между 5 и 4 (снизу)
+  ];
+
   const ringItem = (x: string, dir: 'h' | 'v') => (x[0] === 'p' ? pk(Number(x.slice(1)), dir) : sy(Number(x.slice(1))));
   const strip = (cls: string, items: string[] | undefined, dir: 'h' | 'v') => (items ? `<div class="${cls}">${items.map((x) => ringItem(x, dir)).join('')}</div>` : '');
   const bedHtml = (b: number) => {
@@ -626,7 +636,8 @@ function renderSheet(): string {
         ${strip('bside', st.right, 'v')}</div>
       ${strip('bbot', st.bottom, 'h') || '<div></div>'}</div>`;
   };
-  const garden = `<div class="garden"><div class="beds">${[1, 2, 3, 6, 5, 4].map(bedHtml).join('')}</div></div>`;
+  const gaps = GAPS.map((g) => `<div class="gap ${g.cls} ${g.kind}">${sy(g.sym)}</div>`).join('');
+  const garden = `<div class="garden"><div class="beds">${[1, 2, 3, 6, 5, 4].map(bedHtml).join('')}${gaps}</div></div>`;
 
   // ---- Клумба ----
   const per = PERENNIALS.map((c, i) => {
@@ -670,9 +681,10 @@ function renderSheet(): string {
     const big = tip(d.name, d.desc, `<div class="ttpic">${BARN_PICS[it] ?? ''}</div><div class="ttcells">${d.cells.map((k, i) => cell(k, i < n)).join('')}${d.vp ? rosette(d.vp) : ''}</div>`);
     const pic = BARN_PICS[it] ?? '';
     return `<div class="item ${ready ? 'ready' : ''} ${hot('barn', it) ? 'hl' : ''} col${idx % 3}"${tattr('barn', it)} data-tip="${big}">
-      <div class="in"><span class="bpic">${pic}</span><span class="nm">${d.name}</span>${d.vp ? rosette(d.vp) : '<small>особо</small>'}</div>
+      <span class="nm">${d.name}</span><span class="bpic">${pic}</span>
       <div class="cells">${d.cells.map((k, i) => cell(k, i < n)).join('')}</div>
-      <div class="btx">${BARN_SHORT[it]}</div></div>`;
+      <div class="btx">${BARN_SHORT[it]}</div>
+      <span class="vpx">${d.vp ? rosette(d.vp) : '<small>особо</small>'}</span></div>`;
   }).join('')}</div></div>`;
 
   // ---- Шкалы и итог ----
