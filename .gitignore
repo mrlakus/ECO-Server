@@ -3,3 +3,4 @@ public/app.js
 *.log
 .DS_Store
 dist/
+data/

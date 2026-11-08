@@ -11,3 +11,8 @@ services:
     envVars:
       - key: NODE_VERSION
         value: "22"
+      # Сохранение партий (необязательно): значения вводятся в панели Render, в репозитории их нет
+      - key: UPSTASH_REDIS_REST_URL
+        sync: false
+      - key: UPSTASH_REDIS_REST_TOKEN
+        sync: false

@@ -10,6 +10,7 @@ import { chooseAction } from '../shared/bot';
 import type { Action, GameState } from '../shared/types';
 import { MAX_PLAYERS, MIN_PLAYERS } from '../shared/data';
 import { DECLINE_COOLDOWN_MS, VOTE_TIMEOUT_MS, waitingFor } from './vote';
+import { createStore, type SavedRoom } from './store';
 
 // Папка public: рядом с исходниками (src/server → ../../public) или рядом с собранным файлом (dist → ../public)
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -57,6 +58,64 @@ const cleanChat = (v: unknown) =>
     .trim()
     .slice(0, 200);
 const rooms = new Map<string, Room>();
+const store = createStore();
+
+// ---------- Сохранение партий ----------
+const saveTimers = new Map<string, NodeJS.Timeout>();
+const snapshot = (room: Room): SavedRoom => ({
+  v: 1,
+  code: room.code,
+  hostId: room.hostId,
+  members: room.members.map((m) => ({ id: m.id, token: m.token, name: m.name, bot: m.bot })),
+  game: room.game,
+  pw: room.pw,
+  chat: room.chat,
+  chatSeq: room.chatSeq,
+  savedAt: Date.now(),
+});
+/** Сохраняет комнату не чаще раза в ~1,5 секунды (изменения за это время склеиваются). */
+function persist(room: Room) {
+  if (store.kind === 'off' || room.closed || saveTimers.has(room.code)) return;
+  saveTimers.set(
+    room.code,
+    setTimeout(() => {
+      saveTimers.delete(room.code);
+      if (!rooms.has(room.code)) return;
+      store.save(snapshot(room)).catch((e) => slog(`ошибка сохранения комнаты ${room.code}: ${e instanceof Error ? e.message : e}`));
+    }, 1500),
+  );
+}
+function unpersist(code: string) {
+  const t = saveTimers.get(code);
+  if (t) clearTimeout(t);
+  saveTimers.delete(code);
+  if (store.kind !== 'off') store.remove(code).catch(() => {});
+}
+async function restoreRooms() {
+  if (store.kind === 'off') return;
+  try {
+    const saved = await store.loadAll();
+    for (const r of saved) {
+      if (rooms.has(r.code)) continue;
+      const room: Room = {
+        code: r.code,
+        hostId: r.hostId,
+        members: r.members.map((m) => ({ ...m, socket: null })),
+        game: r.game,
+        touched: Date.now(),
+        lastDecline: {},
+        pwFails: [],
+        chat: (r.chat as ChatMsg[]) ?? [],
+        chatSeq: r.chatSeq ?? 0,
+        pw: r.pw,
+      };
+      rooms.set(room.code, room);
+    }
+    slog(`хранилище (${store.kind}): восстановлено комнат — ${saved.length}`);
+  } catch (e) {
+    slog(`не удалось восстановить комнаты: ${e instanceof Error ? e.message : e}`);
+  }
+}
 
 // ---------- Пароль комнаты ----------
 const hashPw = (pw: string) => {
@@ -75,6 +134,7 @@ const stamp = () => new Date().toISOString().replace('T', ' ').slice(0, 19);
 export const slog = (msg: string) => console.log(`[${stamp()}] ${msg}`);
 function deleteRoom(room: Room, why: string) {
   if (!rooms.delete(room.code)) return;
+  unpersist(room.code);
   scheduleRoomList();
   slog(`комната ${room.code} закрыта: ${why}`);
 }
@@ -152,6 +212,7 @@ function scheduleRoomList() {
 
 function broadcast(room: Room) {
   scheduleRoomList();
+  persist(room);
   room.touched = Date.now();
   if (room.game?.phase === 'over' && !room.overLogged) {
     room.overLogged = true;
@@ -477,6 +538,7 @@ function handle(ws: WebSocket, conn: Conn, raw: string) {
       room.chat.push(m);
       if (room.chat.length > 100) room.chat.splice(0, room.chat.length - 100);
       for (const mm of room.members) send(mm.socket, { type: 'chat', msg: m });
+      persist(room);
       return;
     }
     case 'listrooms':
@@ -588,4 +650,19 @@ setInterval(() => {
   slog(`сводка: комнат ${rooms.size} (в игре ${playing}), людей онлайн ${online}`);
 }, 5 * 60 * 1000).unref();
 
-server.listen(PORT, '0.0.0.0', () => slog(`Три сестры: сервер запущен, порт ${PORT}`));
+void restoreRooms().then(() => {
+  server.listen(PORT, '0.0.0.0', () => slog(`Три сестры: сервер запущен, порт ${PORT}; сохранение партий: ${store.kind === 'off' ? 'выключено' : store.kind === 'redis' ? 'Upstash Redis' : 'файлы'}`));
+});
+
+// Аккуратное завершение (Render присылает SIGTERM при перезапуске): сохраняем все комнаты, не дожидаясь таймеров
+async function flushAll() {
+  if (store.kind === 'off') return;
+  await Promise.allSettled([...rooms.values()].filter((r) => !r.closed).map((r) => store.save(snapshot(r))));
+}
+for (const sig of ['SIGTERM', 'SIGINT'] as const) {
+  process.on(sig, () => {
+    slog(`получен ${sig}: сохраняем комнаты и выходим`);
+    void flushAll().finally(() => process.exit(0));
+    setTimeout(() => process.exit(0), 4000).unref();
+  });
+}
