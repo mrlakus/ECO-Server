@@ -11,7 +11,7 @@
     "dev": "concurrently -k -n server,client -c blue,green \"tsx watch src/server/index.ts\" \"esbuild src/client/main.ts --bundle --outfile=public/app.js --target=es2020 --watch\"",
     "test": "tsx --test test/*.test.ts",
     "typecheck": "tsc --noEmit",
-    "versions": "git tag -n --sort=creatordate"
+    "versions": "git log --reverse --format=\"%h  %ad  %s\" --date=format:\"%d.%m %H:%M\""
   },
   "dependencies": {
     "ws": "^8.18.0"
