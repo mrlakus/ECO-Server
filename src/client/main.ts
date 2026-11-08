@@ -35,6 +35,7 @@ import { FLOWER_COLORS, flower, goodsBadge, ic, rosette } from './icons';
 import { VERSION } from '../shared/version';
 import { BARN_PICS, beanPlant, cornPlant, pumpkinPlant } from './plants';
 import { SCENES } from './scenes';
+import { music } from './music';
 
 // ---------------------------------------------------------------------------
 // Состояние клиента
@@ -312,12 +313,19 @@ fit();
 // Экраны
 // ---------------------------------------------------------------------------
 
+/** Кнопка включения музыки и ползунок громкости (показываются в меню). */
+function musicWidget(): string {
+  return `<div class="music"><button class="mbtn" data-a="music" aria-pressed="${music.on}" title="${music.on ? 'Выключить музыку' : 'Включить музыку'}">${music.on ? '🎵' : '🔇'}</button>
+    <input type="range" id="vol" min="0" max="100" value="${Math.round(music.vol * 100)}" aria-label="Громкость музыки" ${music.on ? '' : 'disabled'}></div>`;
+}
+
 function render() {
   const scrollY = window.scrollY;
   document.getElementById('tip')?.classList.remove('show');
   if (!room) app.innerHTML = renderLobby();
   else if (!state) app.innerHTML = renderRoom();
   else app.innerHTML = renderGame();
+  music.setMenuVisible(!state);
   if (pendingScroll) {
     document.getElementById(pendingScroll)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
     pendingScroll = null;
@@ -332,6 +340,7 @@ function renderLobby(): string {
   const saved = session?.name ?? localStorage.getItem('ts-name') ?? '';
   return `
   <div class="screen">
+    ${musicWidget()}
     <div class="logo"><div class="logo-ic">${ic.pumpkin}${ic.corn}${ic.bean}</div><h1>Три сестры</h1><p>Онлайн-версия настольной игры для 2–4 игроков</p><p class="verno">версия ${VERSION}</p></div>
     ${connected ? '' : '<div class="hint">Подключаемся к серверу…</div>'}
     ${windowWrap(`
@@ -353,6 +362,7 @@ function renderRoom(): string {
   const link = `${location.origin}/?room=${r.code}`;
   return `
   <div class="screen">
+    ${musicWidget()}
     <div class="logo"><div class="logo-ic">${ic.pumpkin}${ic.corn}${ic.bean}</div><h1>Комната</h1><p>Отправьте код или ссылку друзьям</p></div>
     ${windowWrap(`
     <div class="paper"><div class="code">${r.code}</div>
@@ -940,6 +950,15 @@ app.addEventListener('click', (ev) => {
       return send({ type: 'voteend', yes: false });
     case 'cancelend':
       return send({ type: 'cancelend' });
+    case 'music': {
+      music.setOn(!music.on);
+      el.textContent = music.on ? '🎵' : '🔇';
+      el.setAttribute('aria-pressed', String(music.on));
+      el.title = music.on ? 'Выключить музыку' : 'Включить музыку';
+      const vol = document.getElementById('vol') as HTMLInputElement | null;
+      if (vol) vol.disabled = !music.on;
+      return;
+    }
     case 'fullscreen':
       if (document.fullscreenElement) void document.exitFullscreen();
       else void document.documentElement.requestFullscreen?.();
@@ -1053,7 +1072,12 @@ app.addEventListener('click', (e) => {
 app.addEventListener('input', (e) => {
   const t = e.target as HTMLInputElement;
   if (t.id === 'code') t.value = t.value.toUpperCase();
+  if (t.id === 'vol') music.setVolume(Number(t.value) / 100);
 });
+
+// Браузеры разрешают звук только после касания: первое касание/клавиша запускает музыку (если она включена)
+document.addEventListener('pointerdown', () => music.userGesture(), { passive: true });
+document.addEventListener('keydown', () => music.userGesture(), { passive: true });
 
 // Подсказки по таймеру не нужны; держим соединение живым
 setInterval(() => send({ type: 'ping' }), 30000);

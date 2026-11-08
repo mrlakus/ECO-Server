@@ -671,3 +671,11 @@ main.fit.tall { height: auto; min-height: calc(100dvh - var(--hh)); overflow: vi
   .dock .dbtns { flex-wrap: wrap; justify-content: flex-end; }
   .dock .chip { min-height: 36px; font-size: .9rem; padding: 2px 11px; }
 }
+
+/* ---------- 3.3: музыка в меню ---------- */
+.screen { position: relative; }
+.music { position: absolute; top: 8px; right: 8px; z-index: 5; display: flex; align-items: center; gap: 8px; padding: 4px 12px 4px 4px; background: rgba(255, 250, 235, .94); border: 2px solid #a8713f; border-radius: 26px; box-shadow: 0 3px 8px rgba(0, 0, 0, .25); }
+.mbtn { width: 38px; height: 38px; border-radius: 50%; border: 0; background: var(--green); color: #fff; font-size: 1.2rem; line-height: 1; box-shadow: 0 2px 0 var(--green-d); }
+.mbtn[aria-pressed="false"] { background: #b8a77f; box-shadow: 0 2px 0 #8a7a55; }
+.music input[type=range] { width: 96px; accent-color: var(--green); }
+.music input[type=range][disabled] { opacity: .4; }
