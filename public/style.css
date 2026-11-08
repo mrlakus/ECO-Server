@@ -419,3 +419,24 @@ main.fit { height: calc(100dvh - var(--hh) - var(--dh)); display: flex; align-it
 .hbtn:active { background: rgba(255, 255, 255, .35); }
 .overlay.vote { z-index: 70; }
 @media (max-width: 760px) { .hbtn span { display: none; } }
+
+/* ---------- Тыквы внутри грядок, по внешнему краю ---------- */
+.garden { display: block; padding: .6em; }
+.garden .beds { grid-area: auto; height: 100%; gap: 1em; }
+.bed { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; row-gap: .3em; padding: .4em .6em .5em; }
+.bmid { display: flex; gap: .6em; min-height: 0; }
+.bmain { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
+.btop, .bbot { display: flex; align-items: center; gap: 1.2em; padding: .15em .3em; background: rgba(255, 255, 255, .22); border-radius: .8em; }
+.bside { display: flex; flex-direction: column; align-items: center; justify-content: space-around; gap: .5em; padding: .3em .35em; background: rgba(255, 255, 255, .22); border-radius: .8em; }
+.sy { display: inline-flex; align-items: center; gap: .3em; }
+.bside .sy { flex-direction: column; gap: .1em; }
+.sn { font-size: calc(var(--u) * 1.1); line-height: 1.05; color: #3b2a14; font-weight: 700; text-align: center; background: rgba(255, 255, 255, .6); border-radius: .5em; padding: .1em .35em; }
+.sy.on .sn { background: #cfeaa4; }
+.garden .crop { gap: .15em; padding: .2em .3em; }
+.garden .crop .ic { width: calc(var(--u) * 1.5); height: calc(var(--u) * 1.5); }
+.garden .unit { gap: .5em; }
+.gpanel { grid-template-rows: 74em 1fr; }
+.bside { gap: .3em; padding: .25em .3em; }
+.bside .sy .fl .ic { width: calc(var(--u) * 1.9); height: calc(var(--u) * 1.9); }
+.bside .sn { font-size: calc(var(--u) * 1); padding: .05em .3em; }
+.bed { padding: .3em .6em .4em; row-gap: .2em; }

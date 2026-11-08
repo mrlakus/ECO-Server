@@ -582,31 +582,44 @@ function renderSheet(): string {
   };
   const unit = (i: number) =>
     `<div class="unit">${cropBtn(`c${i}`, `${ic.corn}${cellsRow(CORN_CELLS, p.corn[i], 'h')}${rosette(3)}`, p.corn[i] >= CORN_CELLS, tip('Кукуруза', 'Растёт на этой грядке: 4 ячейки. Каждый собранный урожай кукурузы приносит 3 ПО в конце игры.'))}${cropBtn(`b${i}`, `${ic.bean}${cellsRow(BEAN_CELLS, p.beans[i], 'h')}${rosette(1)}`, p.beans[i] >= BEAN_CELLS, tip('Фасоль', '2 ячейки. Сажать можно, только если на соседней кукурузе закрашены хотя бы 2 ячейки. Каждый собранный урожай фасоли приносит 1 ПО в конце игры.'))}</div>`;
+  const pk = (i: number, dir: 'h' | 'v') => {
+    const d = PUMPKINS[i];
+    const f = p.pumpkins[i];
+    return `<div class="pk ${dir}">${cropBtn(`p${i}`, `${goodsBadge(d.goods)}${cellsRow(d.cells, f, dir)}`, f >= d.cells, tip(`Тыква #${i + 1} (грядка ${d.bed})`, `Собрав тыкву, вы сразу получаете ${d.goods} ${d.goods === 1 ? 'товар' : 'товара'}. Тыквы не приносят ПО. Собрав две соседние тыквы, закрасьте цветок между ними и сделайте действие с этим многолетником.`))}</div>`;
+  };
+  /** Цветок между двумя соседними тыквами — с подписью, какой это многолетник. */
+  const sy = (i: number) => {
+    const name = PERENNIAL_NAMES[PUMPKIN_SYMBOLS[i]];
+    return `<span class="sy ${p.symbols[i] ? 'on' : ''}" data-tip="${tip(`Цветок: ${name}`, `Между тыквами #${i + 1} и #${((i + 1) % 12) + 1}. Когда обе собраны, закрасьте этот цветок и выполните действие с многолетником «${name}»: закрасьте следующую ячейку его столбца на клумбе.`)}">${flowerOf(PUMPKIN_SYMBOLS[i], p.symbols[i])}<span class="sn">${name}</span></span>`;
+  };
+  // Кольцо тыкв идёт по контуру огорода, но каждая тыква лежит внутри своей грядки — у её внешнего края.
+  // p<N> — тыква, s<N> — цветок между тыквами N и N+1. Порядок — по часовой стрелке.
+  const STRIPS: Record<number, { top?: string[]; bottom?: string[]; left?: string[]; right?: string[] }> = {
+    1: { top: ['p0', 's11'], left: ['s0', 'p1', 's1', 'p2', 's2'] },
+    2: { top: ['p11', 's10'] },
+    3: { top: ['p10', 's9'], right: ['p9', 's8'] },
+    4: { right: ['p8', 's7', 'p7', 's6'], bottom: ['s5', 'p6'] },
+    5: { bottom: ['s4', 'p5'] },
+    6: { left: ['p3'], bottom: ['s3', 'p4'] },
+  };
+  const ringItem = (x: string, dir: 'h' | 'v') => (x[0] === 'p' ? pk(Number(x.slice(1)), dir) : sy(Number(x.slice(1))));
+  const strip = (cls: string, items: string[] | undefined, dir: 'h' | 'v') => (items ? `<div class="${cls}">${items.map((x) => ringItem(x, dir)).join('')}</div>` : '');
   const bedHtml = (b: number) => {
     const plantOpt = mineView && !sel ? options?.plant?.find((o) => o.bed === b) : undefined;
     const waterOpt = mineView && !sel ? options?.water?.find((o) => o.bed === b) : undefined;
     const btns =
       (plantOpt ? `<button class="bb" data-a="plantbed" data-v="${b}" title="Посадка">${ic.seedling}${plantOpt.cost ? `<i>−${plantOpt.cost}</i>` : ''}</button>` : '') +
       (waterOpt ? `<button class="bb w" data-a="water" data-v="${b}" title="Полив">${ic.can}${waterOpt.cost ? `<i>−${waterOpt.cost}</i>` : ''}</button>` : '');
+    const st = STRIPS[b] ?? {};
     return `<div class="bed b${b} ${plantOpt || waterOpt ? 'ok' : ''} ${sel?.bed === b ? 'sel' : ''}" id="bed-${b}">
-      <div class="bh"><b class="bnum">${b}</b><span class="bact">${btns}</span>${die(b, 'sm')}</div>
-      <div class="units">${UNIT_BED.map((ub, i) => (ub === b ? unit(i) : '')).join('')}</div></div>`;
+      ${strip('btop', st.top, 'h') || '<div></div>'}
+      <div class="bmid">${strip('bside', st.left, 'v')}
+        <div class="bmain"><div class="bh"><b class="bnum">${b}</b><span class="bact">${btns}</span>${die(b, 'sm')}</div>
+          <div class="units">${UNIT_BED.map((ub, i) => (ub === b ? unit(i) : '')).join('')}</div></div>
+        ${strip('bside', st.right, 'v')}</div>
+      ${strip('bbot', st.bottom, 'h') || '<div></div>'}</div>`;
   };
-  const pk = (i: number, dir: 'h' | 'v') => {
-    const d = PUMPKINS[i];
-    const f = p.pumpkins[i];
-    return `<div class="pk ${dir}">${cropBtn(`p${i}`, `${goodsBadge(d.goods)}${cellsRow(d.cells, f, dir)}<small class="bt">${d.bed}</small>`, f >= d.cells, tip(`Тыква #${i + 1} (грядка ${d.bed})`, `Собрав тыкву, вы сразу получаете ${d.goods} ${d.goods === 1 ? 'товар' : 'товара'}. Тыквы не приносят ПО. Собрав две соседние тыквы, закрасьте цветок между ними и сделайте действие с этим многолетником.`))}</div>`;
-  };
-  const sy = (i: number) => `<span class="sy" data-tip="${tip('Цветок между тыквами', `Когда собраны тыквы #${i + 1} и #${((i + 1) % 12) + 1}, закрасьте этот цветок и выполните действие с многолетником «${PERENNIAL_NAMES[PUMPKIN_SYMBOLS[i]]}» (закрасьте следующую ячейку его столбца).`)}">${flowerOf(PUMPKIN_SYMBOLS[i], p.symbols[i])}</span>`;
-  // Кольцо тыкв по периметру: P0 слева-сверху, дальше по часовой стрелке в обратном порядке номеров
-  const top = [pk(0, 'h'), sy(11), pk(11, 'h'), sy(10), pk(10, 'h'), sy(9)];
-  const right = [pk(9, 'v'), sy(8), pk(8, 'v'), sy(7), pk(7, 'v'), sy(6)];
-  const bottom = [sy(3), pk(4, 'h'), sy(4), pk(5, 'h'), sy(5), pk(6, 'h')];
-  const left = [sy(0), pk(1, 'v'), sy(1), pk(2, 'v'), sy(2), pk(3, 'v')];
-  const garden = `<div class="garden">
-    <div class="rtop">${top.join('')}</div><div class="rleft">${left.join('')}</div>
-    <div class="beds">${[1, 2, 3, 6, 5, 4].map(bedHtml).join('')}</div>
-    <div class="rright">${right.join('')}</div><div class="rbot">${bottom.join('')}</div></div>`;
+  const garden = `<div class="garden"><div class="beds">${[1, 2, 3, 6, 5, 4].map(bedHtml).join('')}</div></div>`;
 
   // ---- Клумба ----
   const per = PERENNIALS.map((c, i) => {
