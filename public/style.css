@@ -189,7 +189,7 @@ main.fit { height: calc(100dvh - var(--hh) - var(--dh)); display: flex; align-it
 .edith { position: absolute; bottom: .3em; right: .4em; filter: drop-shadow(0 .2em .2em rgba(0, 0, 0, .45)); }
 .edith .ic { width: calc(var(--u) * 4); height: calc(var(--u) * 4); }
 
-.bside { display: flex; flex-direction: column; gap: 2em; min-height: 0; }
+.bcol { display: flex; flex-direction: column; gap: 2em; min-height: 0; }
 .market-paper { padding-top: 1.6em !important; }
 .mtitle { font-family: Georgia, "Times New Roman", serif; text-transform: uppercase; letter-spacing: .08em; font-weight: 700; text-align: center; border: .25em solid var(--ink2); padding: .4em .8em; margin: .2em 0 .8em; font-size: calc(var(--u) * 1.6); }
 .market { width: 100%; border-collapse: collapse; font-size: calc(var(--u) * 1.75); }
@@ -460,3 +460,30 @@ main.fit { height: calc(100dvh - var(--hh) - var(--dh)); display: flex; align-it
 
 .ver { font-size: .78rem; opacity: .85; white-space: nowrap; text-shadow: 0 1px 0 rgba(0, 0, 0, .3); }
 .logo .verno { margin: 2px 0 0; font-size: .85rem; color: #7a6f55; }
+
+/* ---------- Фоновые иллюстрации (public/art/*.svg). Ячейки лежат на светлых плашках, чтобы не сливаться с фоном ---------- */
+body {
+  background: linear-gradient(rgba(244, 239, 226, .2), rgba(244, 239, 226, .2)), url(/art/farm.svg) center bottom / cover fixed, #cfe3c9;
+}
+.garden {
+  background: linear-gradient(rgba(255, 255, 255, .1), rgba(255, 255, 255, .1)), url(/art/garden.svg) center / cover, #9ed272;
+}
+.barnbox { background: linear-gradient(rgba(255, 248, 230, .18), rgba(255, 248, 230, .18)), url(/art/barn.svg) center / cover, #d9b88a; }
+.apiarybox { background: linear-gradient(rgba(255, 252, 235, .15), rgba(255, 252, 235, .15)), url(/art/apiary.svg) center bottom / cover, #cfe8c0; }
+.orchardbox { background: linear-gradient(rgba(255, 252, 235, .15), rgba(255, 252, 235, .15)), url(/art/orchard.svg) center bottom / cover, #cfe8c0; }
+.perbox { background: linear-gradient(rgba(255, 252, 240, .2), rgba(255, 252, 240, .2)), url(/art/flowers.svg) center bottom / cover, #e3f0cf; }
+
+/* Подписи разделов — на табличках, чтобы читались на любом фоне */
+.bt2 {
+  width: fit-content; background: rgba(255, 250, 235, .94); border: calc(var(--u) * .15) solid #a8713f; border-radius: 2em;
+  padding: .1em .9em .1em .5em; box-shadow: 0 .15em .3em rgba(0, 0, 0, .22);
+}
+/* Всё, где ставят крестики, — на светлых плашках с чёткой рамкой */
+.orow { background: rgba(255, 253, 245, .92); border: calc(var(--u) * .18) solid #b89868; border-radius: .8em; box-shadow: 0 .12em .25em rgba(0, 0, 0, .15); }
+.acol { border: calc(var(--u) * .18) solid #b89868; box-shadow: 0 .12em .25em rgba(0, 0, 0, .15); }
+.item { border: calc(var(--u) * .22) solid #a8844f; box-shadow: 0 .15em .3em rgba(0, 0, 0, .2); }
+.pcol { box-shadow: 0 .12em .25em rgba(0, 0, 0, .15); }
+.acol.lock { opacity: .72; }
+
+.acol.lock { opacity: 1; background: #efe7d0; }
+.acol.lock .prow, .acol.lock h4 { opacity: .55; }

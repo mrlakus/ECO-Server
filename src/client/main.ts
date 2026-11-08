@@ -389,7 +389,7 @@ function renderBoard(): string {
     <div class="bleft">${windowWrap(`
       <div class="paper rounds-paper"><div class="rounds">${rounds}</div></div>
       <div class="field">${grid}${marker}</div>`)}</div>
-    <div class="bside">
+    <div class="bcol">
       <div class="paper torn market-paper"><div class="mtitle">Фермерский рынок</div>
         <table class="market"><thead><tr><th>Товары</th><th>Бонусы</th></tr></thead><tbody>${rows}</tbody></table></div>
       <div class="pl-list">${players}</div>
