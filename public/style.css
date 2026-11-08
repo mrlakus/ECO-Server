@@ -457,3 +457,6 @@ main.fit { height: calc(100dvh - var(--hh) - var(--dh)); display: flex; align-it
 }
 .bside { padding: .35em .3em; }
 .btop, .bbot { padding: .2em .5em; }
+
+.ver { font-size: .78rem; opacity: .85; white-space: nowrap; text-shadow: 0 1px 0 rgba(0, 0, 0, .3); }
+.logo .verno { margin: 2px 0 0; font-size: .85rem; color: #7a6f55; }

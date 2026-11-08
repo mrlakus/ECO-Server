@@ -32,6 +32,7 @@ import {
 import { beansDone, cornDone, scorePlayer, compostAvail, isPrepared } from '../shared/engine';
 import type { Action, GameState, Options, PlayerState, Target } from '../shared/types';
 import { FLOWER_COLORS, flower, goodsBadge, ic, rosette } from './icons';
+import { VERSION } from '../shared/version';
 
 // ---------------------------------------------------------------------------
 // Состояние клиента
@@ -229,7 +230,7 @@ function renderLobby(): string {
   const saved = session?.name ?? localStorage.getItem('ts-name') ?? '';
   return `
   <div class="screen">
-    <div class="logo"><div class="logo-ic">${ic.pumpkin}${ic.corn}${ic.bean}</div><h1>Три сестры</h1><p>Онлайн-версия настольной игры для 2–4 игроков</p></div>
+    <div class="logo"><div class="logo-ic">${ic.pumpkin}${ic.corn}${ic.bean}</div><h1>Три сестры</h1><p>Онлайн-версия настольной игры для 2–4 игроков</p><p class="verno">версия ${VERSION}</p></div>
     ${connected ? '' : '<div class="hint">Подключаемся к серверу…</div>'}
     ${windowWrap(`
     <div class="paper"><h3 class="script">Ваше имя</h3>
@@ -284,6 +285,7 @@ function renderGame(): string {
   <header class="top">
     <span class="round">Раунд ${Math.min(s.round, ROUNDS)}/${ROUNDS}</span>
     <span class="ev">${phaseName}${connected ? '' : ' · ⚠ нет связи'}</span>
+    <span class="ver" title="Версия приложения">v${VERSION}</span>
     ${over ? '' : '<button class="hbtn" data-a="proposeend" title="Предложить всем закончить игру и выйти в меню">🏳 <span>Закончить игру</span></button>'}
     ${document.fullscreenEnabled ? `<button class="fs" data-a="fullscreen" title="На весь экран">${document.fullscreenElement ? '✕' : '⛶'}</button>` : ''}
     <nav class="tabs">
