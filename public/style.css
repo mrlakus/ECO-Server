@@ -487,3 +487,13 @@ body {
 
 .acol.lock { opacity: 1; background: #efe7d0; }
 .acol.lock .prow, .acol.lock h4 { opacity: .55; }
+
+/* 2.5: чуть компактнее значки в столбцах пасеки и текст в карточках сарая, чтобы ничего не обрезалось */
+.stage .acol .fx .ic { width: calc(var(--u) * 1.5); height: calc(var(--u) * 1.5); }
+.stage .acol .fx { gap: calc(var(--u) * .05); }
+.stage .acol .fx .ros { width: calc(var(--u) * 1.4); height: calc(var(--u) * 1.7); }
+.stage .acol .fx .gbadge { width: calc(var(--u) * 1.9); height: calc(var(--u) * 1.7); }
+.stage .acol .fxs .ic:first-child { width: calc(var(--u) * 1.4); height: calc(var(--u) * 1.4); }
+.item .btx { font-size: calc(var(--u) * 1.1); line-height: 1.08; }
+.item .in { font-size: calc(var(--u) * 1.4); }
+.item .cells { gap: calc(var(--u) * .15); }
