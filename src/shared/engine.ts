@@ -567,6 +567,27 @@ export function applyAction(state: GameState, playerId: string, action: Action, 
   return ok;
 }
 
+/**
+ * Предпросмотр хода: выполняет действие на копии состояния, но не переходит к следующей фазе/игроку/раунду.
+ * Результат для листа игрока совпадает с настоящим выполнением (движок детерминирован).
+ */
+export function previewAction(state: GameState, playerId: string, action: Action): Result {
+  const p = state.players.find((x) => x.id === playerId);
+  if (!p) return fail('Игрок не найден');
+  if (state.phase === 'over') return fail('Партия окончена');
+  const res = dispatch(state, p, action);
+  if (!res.ok) return res;
+  settle(state, p);
+  return ok;
+}
+
+/** Ход игрока полностью выполнен (в предпросмотре): больше нет задач, и кубик взят, если это фаза садоводства. */
+export function turnDone(state: GameState, playerId: string): boolean {
+  const p = state.players.find((x) => x.id === playerId);
+  if (!p || state.phase === 'over') return false;
+  return p.tasks.length === 0 && (state.phase !== 'pick' || state.pickTaken);
+}
+
 function dispatch(state: GameState, p: PlayerState, a: Action): Result {
   if (a.t === 'pick') return doPick(state, p, a.cell);
   if (state.phase === 'pick' && state.players[activeIndex(state)] !== p) return fail('Сейчас ход другого игрока');

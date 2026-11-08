@@ -29,7 +29,7 @@ import {
   UNIT_COUNT,
   type GardenRow,
 } from '../shared/data';
-import { beansDone, cornDone, scorePlayer, compostAvail, isPrepared } from '../shared/engine';
+import { beansDone, cornDone, scorePlayer, compostAvail, isPrepared, optionsFor, previewAction, turnDone } from '../shared/engine';
 import type { Action, GameState, Options, PlayerState, Target } from '../shared/types';
 import { FLOWER_COLORS, flower, goodsBadge, ic, rosette } from './icons';
 import { VERSION } from '../shared/version';
@@ -58,8 +58,14 @@ let ws: WebSocket | null = null;
 let session: Session | null = loadSession();
 let you = '';
 let room: RoomInfo | null = null;
+// state/options — то, что показываем (с учётом плана хода); serverState/serverOptions — то, что прислал сервер.
 let state: GameState | null = null;
 let options: Options | null = null;
+let serverState: GameState | null = null;
+let serverOptions: Options | null = null;
+let pending: Action[] = []; // спланированные, но ещё не отправленные действия хода
+let planComplete = false; // ход в плане выполнен полностью — можно подтверждать
+let submitting = false; // ход отправлен, ждём ответ сервера
 let connected = false;
 let tab: Tab = 'board';
 let viewId = '';
@@ -105,6 +111,76 @@ function connect() {
   };
 }
 
+/** Пересчёт того, что показываем: состояние сервера + действия плана (предпросмотр). */
+function recompute() {
+  planComplete = false;
+  if (!serverState) {
+    state = null;
+    options = null;
+    return;
+  }
+  if (!pending.length) {
+    state = serverState;
+    options = serverOptions;
+    return;
+  }
+  const s = structuredClone(serverState);
+  for (const a of pending) {
+    const r = previewAction(s, you, a);
+    if (!r.ok) {
+      pending = [];
+      selection = null;
+      toast('Состояние игры изменилось — выберите ход заново');
+      state = serverState;
+      options = serverOptions;
+      return;
+    }
+  }
+  state = s;
+  options = optionsFor(s, you);
+  planComplete = turnDone(s, you);
+}
+function autoTab() {
+  if (options?.kind === 'pick') tab = 'board';
+  else if (options && ['turn', 'act', 'field'].includes(options.kind) && tab === 'board' && state?.phase !== 'over') tab = 'sheet';
+}
+/** Добавить действие в план хода (на сервер оно уйдёт только после «Подтвердить»). */
+function plan(action: Action) {
+  if (!serverState || !state || submitting) return;
+  const test = structuredClone(state);
+  const r = previewAction(test, you, action);
+  if (!r.ok) return toast(r.error);
+  pending.push(action);
+  selection = null;
+  recompute();
+  autoTab();
+  render();
+}
+function undoLast() {
+  if (submitting) return;
+  pending.pop();
+  selection = null;
+  recompute();
+  autoTab();
+  render();
+}
+function resetPlan() {
+  if (submitting) return;
+  pending = [];
+  selection = null;
+  recompute();
+  autoTab();
+  render();
+}
+function confirmPlan() {
+  if (!pending.length || !planComplete || submitting) return;
+  submitting = true;
+  send({ type: 'batch', actions: pending });
+  pending = [];
+  selection = null;
+  render();
+}
+
 function send(msg: unknown) {
   if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
 }
@@ -122,8 +198,10 @@ function onMessage(m: any) {
     case 'update': {
       room = m.room;
       you = m.you;
-      state = m.state ?? null;
-      options = m.options ?? null;
+      serverState = m.state ?? null;
+      serverOptions = m.options ?? null;
+      submitting = false;
+      recompute();
       if (state?.phase !== 'over') showResults = true;
       if (!viewId || !state?.players.some((p) => p.id === viewId)) viewId = you;
       const key = options ? JSON.stringify([options.kind, options.die, options.hint, state?.round, state?.phase]) : '';
@@ -138,8 +216,10 @@ function onMessage(m: any) {
     case 'ended':
       saveSession(null);
       room = null;
-      state = null;
-      options = null;
+      serverState = null;
+      serverOptions = null;
+      pending = [];
+      recompute();
       selection = null;
       history.replaceState(null, '', location.pathname);
       toast(m.message);
@@ -147,12 +227,19 @@ function onMessage(m: any) {
     case 'left':
       saveSession(null);
       room = null;
-      state = null;
-      options = null;
+      serverState = null;
+      serverOptions = null;
+      pending = [];
+      recompute();
       history.replaceState(null, '', location.pathname);
       break;
     case 'error':
       toast(m.message);
+      if (submitting) {
+        submitting = false;
+        pending = [];
+        recompute();
+      }
       if (!room && session) {
         // Комната не найдена при автопереподключении — сбрасываем сессию
         if (/не найдена|началась/.test(m.message)) saveSession(null);
@@ -582,6 +669,9 @@ function renderSheet(): string {
   const tattr = (area: string, target: string) =>
     hot(area, target) ? ` data-a="target" data-area="${area}" data-target="${target}"${tmap.get(`${area}:${target}`) !== undefined ? ` data-slot="${tmap.get(`${area}:${target}`)}"` : ''}` : '';
   const sc = scorePlayer(p);
+  // «База» — как лист выглядит у сервера; отличия от неё показываем как запланированные (синим)
+  const bp = pending.length && p.id === you && serverState ? (serverState.players.find((x) => x.id === p.id) ?? p) : p;
+  const planX = (j: number, f0: number, f: number) => (j >= f0 && j < f ? 'plan' : '');
 
   const chips = s.players
     .map((x) => `<button class="${x.id === p.id ? 'on' : ''}" data-a="view" data-v="${x.id}">${esc(x.name)}${x.id === you ? ' (я)' : ''}</button>`)
@@ -589,32 +679,32 @@ function renderSheet(): string {
 
   // ---- Огород ----
   const sel = selection;
-  const cellsRow = (n: number, f: number, dir: 'h' | 'v') => {
+  const cellsRow = (n: number, f: number, dir: 'h' | 'v', f0 = f) => {
     let h = '';
-    if (dir === 'h') for (let j = 0; j < n; j++) h += cell(j === n - 1 ? 'c' : 's', j < f);
-    else for (let j = n - 1; j >= 0; j--) h += cell(j === n - 1 ? 'c' : 's', j < f);
+    if (dir === 'h') for (let j = 0; j < n; j++) h += cell(j === n - 1 ? 'c' : 's', j < f, planX(j, f0, f));
+    else for (let j = n - 1; j >= 0; j--) h += cell(j === n - 1 ? 'c' : 's', j < f, planX(j, f0, f));
     return `<span class="cs ${dir}">${h}</span>`;
   };
   /** Картинка растения (растёт по мере полива) со значком очков/товаров в углу. */
   const plantBox = (picSvg: string, badge: string) => `<span class="plant">${picSvg}${badge}</span>`;
-  const cropBtn = (id: string, inner: string, done: boolean, tipHtml = '') => {
+  const cropBtn = (id: string, inner: string, done: boolean, tipHtml = '', planned = false) => {
     const planting = mineView && sel && options?.plant?.find((b) => b.bed === sel.bed)?.crops?.includes(id);
     const chosen = sel?.crops.includes(id);
-    return `<button class="crop ${planting ? 'pick' : ''} ${chosen ? 'chosen' : ''} ${done ? 'done' : ''}" ${planting ? `data-a="crop" data-v="${id}"` : 'disabled'} ${tipHtml ? `data-tip="${tipHtml}"` : ''}>${inner}</button>`;
+    return `<button class="crop ${planting ? 'pick' : ''} ${chosen ? 'chosen' : ''} ${done ? 'done' : ''} ${planned ? 'planned' : ''}" ${planting ? `data-a="crop" data-v="${id}"` : 'disabled'} ${tipHtml ? `data-tip="${tipHtml}"` : ''}>${inner}</button>`;
   };
   const unit = (i: number) =>
-    `<div class="unit">${cropBtn(`c${i}`, `${plantBox(cornPlant(p.corn[i]), rosette(3))}${cellsRow(CORN_CELLS, p.corn[i], 'h')}`, p.corn[i] >= CORN_CELLS, tip('Кукуруза', 'Растёт на этой грядке: 4 ячейки. Каждый собранный урожай кукурузы приносит 3 ПО в конце игры.'))}${cropBtn(`b${i}`, `${plantBox(beanPlant(p.beans[i]), rosette(1))}${cellsRow(BEAN_CELLS, p.beans[i], 'h')}`, p.beans[i] >= BEAN_CELLS, tip('Фасоль', '2 ячейки. Сажать можно, только если на соседней кукурузе закрашены хотя бы 2 ячейки. Каждый собранный урожай фасоли приносит 1 ПО в конце игры.'))}</div>`;
+    `<div class="unit">${cropBtn(`c${i}`, `${plantBox(cornPlant(p.corn[i]), rosette(3))}${cellsRow(CORN_CELLS, p.corn[i], 'h', bp.corn[i])}`, p.corn[i] >= CORN_CELLS, tip('Кукуруза', 'Растёт на этой грядке: 4 ячейки. Каждый собранный урожай кукурузы приносит 3 ПО в конце игры.'), p.corn[i] !== bp.corn[i])}${cropBtn(`b${i}`, `${plantBox(beanPlant(p.beans[i]), rosette(1))}${cellsRow(BEAN_CELLS, p.beans[i], 'h', bp.beans[i])}`, p.beans[i] >= BEAN_CELLS, tip('Фасоль', '2 ячейки. Сажать можно, только если на соседней кукурузе закрашены хотя бы 2 ячейки. Каждый собранный урожай фасоли приносит 1 ПО в конце игры.'), p.beans[i] !== bp.beans[i])}</div>`;
   const pk = (i: number, dir: 'h' | 'v') => {
     const d = PUMPKINS[i];
     const f = p.pumpkins[i];
     const level = f >= d.cells ? 4 : f <= 0 ? 0 : Math.min(3, Math.ceil((3 * f) / d.cells));
     const pic = plantBox(pumpkinPlant(level), goodsBadge(d.goods));
-    return `<div class="pk ${dir}">${cropBtn(`p${i}`, dir === 'h' ? `${pic}${cellsRow(d.cells, f, dir)}` : `${cellsRow(d.cells, f, dir)}${pic}`, f >= d.cells, tip(`Тыква #${i + 1} (грядка ${d.bed})`, `Собрав тыкву, вы сразу получаете ${d.goods} ${d.goods === 1 ? 'товар' : 'товара'}. Тыквы не приносят ПО. Собрав две соседние тыквы, закрасьте цветок между ними и сделайте действие с этим многолетником.`))}</div>`;
+    return `<div class="pk ${dir}">${cropBtn(`p${i}`, dir === 'h' ? `${pic}${cellsRow(d.cells, f, dir, bp.pumpkins[i])}` : `${cellsRow(d.cells, f, dir, bp.pumpkins[i])}${pic}`, f >= d.cells, tip(`Тыква #${i + 1} (грядка ${d.bed})`, `Собрав тыкву, вы сразу получаете ${d.goods} ${d.goods === 1 ? 'товар' : 'товара'}. Тыквы не приносят ПО. Собрав две соседние тыквы, закрасьте цветок между ними и сделайте действие с этим многолетником.`), f !== bp.pumpkins[i])}</div>`;
   };
   /** Цветок между двумя соседними тыквами — с подписью, какой это многолетник. */
   const sy = (i: number) => {
     const name = PERENNIAL_NAMES[PUMPKIN_SYMBOLS[i]];
-    return `<span class="sy ${p.symbols[i] ? 'on' : ''}" data-tip="${tip(`Цветок: ${name}`, `Между тыквами #${i + 1} и #${((i + 1) % 12) + 1}. Когда обе собраны, закрасьте этот цветок и выполните действие с многолетником «${name}»: закрасьте следующую ячейку его столбца на клумбе.`)}">${flowerOf(PUMPKIN_SYMBOLS[i], p.symbols[i])}<span class="sn">${name}</span></span>`;
+    return `<span class="sy ${p.symbols[i] ? 'on' : ''} ${p.symbols[i] && !bp.symbols[i] ? 'planned' : ''}" data-tip="${tip(`Цветок: ${name}`, `Между тыквами #${i + 1} и #${((i + 1) % 12) + 1}. Когда обе собраны, закрасьте этот цветок и выполните действие с многолетником «${name}»: закрасьте следующую ячейку его столбца на клумбе.`)}">${flowerOf(PUMPKIN_SYMBOLS[i], p.symbols[i])}<span class="sn">${name}</span></span>`;
   };
   // Кольцо тыкв идёт по контуру огорода, но каждая тыква лежит внутри своей грядки — у её внешнего края.
   // p<N> — тыква, s<N> — цветок между тыквами N и N+1. Порядок — по часовой стрелке.
@@ -661,30 +751,30 @@ function renderSheet(): string {
     const f = p.perennial[i];
     let rowsH = '';
     for (let j = PERENNIAL_CELLS - 1; j >= 0; j--)
-      rowsH += `<div class="prow" data-tip="${tip(`${PERENNIAL_NAMES[c]} — ячейка ${j + 1}`, PEREN_TIP[c][j], j === 5 ? '' : '')}">${cell(j === 5 ? 'c' : 's', j < f)}${fx(...PEREN_FX[c][j])}</div>`;
+      rowsH += `<div class="prow" data-tip="${tip(`${PERENNIAL_NAMES[c]} — ячейка ${j + 1}`, PEREN_TIP[c][j], j === 5 ? '' : '')}">${cell(j === 5 ? 'c' : 's', j < f, planX(j, bp.perennial[i], f))}${fx(...PEREN_FX[c][j])}</div>`;
     return `<div class="pcol ${hot('perennial', c) ? 'hl' : ''}" style="--fc:${FLOWER_COLORS[c]}"${tattr('perennial', c)}><div class="ph">${flower(FLOWER_COLORS[c])}<span>${PERENNIAL_NAMES[c]}</span></div>${rowsH}</div>`;
   }).join('');
 
   // ---- Пасека ----
   const lockedApiary = p.main < APIARY_MAIN.length;
-  const acol = (id: string, title: string, n: number, kinds: ('s' | 'c')[], fxs: string[][], tips: string[], locked: boolean) => {
+  const acol = (id: string, title: string, n: number, n0: number, kinds: ('s' | 'c')[], fxs: string[][], tips: string[], locked: boolean) => {
     let h = '';
     for (let j = kinds.length - 1; j >= 0; j--)
-      h += `<div class="prow"${tips[j] ? ` data-tip="${tip(title, tips[j])}"` : ''}>${cell(kinds[j], j < n)}${fx(...fxs[j])}</div>`;
+      h += `<div class="prow"${tips[j] ? ` data-tip="${tip(title, tips[j])}"` : ''}>${cell(kinds[j], j < n, planX(j, n0, n))}${fx(...fxs[j])}</div>`;
     return `<div class="acol ${locked ? 'lock' : ''} ${hot('apiary', id) ? 'hl' : ''}"${tattr('apiary', id)}><h4>${title}</h4>${h}</div>`;
   };
   const apiary = `<div class="box apiarybox"><h3 class="bt2">${ic.bee}Пасека</h3><div class="apiary">
-    ${acol('main', 'Улей', p.main, APIARY_MAIN.map((c) => c.kind), MAIN_FX, MAIN_TIP, false)}
-    ${acol('wax', 'Воск', p.wax, APIARY_WAX.map((c) => c.kind), WAX_FX, WAX_TIP, lockedApiary)}
-    ${acol('honey', 'Мёд', p.honey, APIARY_HONEY.map((c) => c.kind), HONEY_FX, HONEY_TIP, lockedApiary)}
-    ${acol('hive2', 'Семья', p.hive2, APIARY_HIVE2.map(() => 'c' as const), HIVE_FX, HIVE_TIP, lockedApiary)}</div></div>`;
+    ${acol('main', 'Улей', p.main, bp.main, APIARY_MAIN.map((c) => c.kind), MAIN_FX, MAIN_TIP, false)}
+    ${acol('wax', 'Воск', p.wax, bp.wax, APIARY_WAX.map((c) => c.kind), WAX_FX, WAX_TIP, lockedApiary)}
+    ${acol('honey', 'Мёд', p.honey, bp.honey, APIARY_HONEY.map((c) => c.kind), HONEY_FX, HONEY_TIP, lockedApiary)}
+    ${acol('hive2', 'Семья', p.hive2, bp.hive2, APIARY_HIVE2.map(() => 'c' as const), HIVE_FX, HIVE_TIP, lockedApiary)}</div></div>`;
 
   // ---- Сад ----
   const orchard = `<div class="box orchardbox"><h3 class="bt2">${ic.apple}Сад</h3>${GARDEN_ROWS.map((r) => {
     const cells = GARDEN_CELLS[r]
       .map((k, i) => {
         const extra = r === 'raspberry' && RASP_VP[i + 1] ? [RASP_VP[i + 1]] : [];
-        return `<span class="gc">${cell(k, i < p.garden[r], extra.length ? 'mark' : '')}${k === 'c' ? fx(...ROW_FX[r]) : '<span class="fx"></span>'}${r === 'raspberry' ? fx(...extra) : ''}</span>`;
+        return `<span class="gc">${cell(k, i < p.garden[r], `${extra.length ? 'mark' : ''} ${planX(i, bp.garden[r], p.garden[r])}`)}${k === 'c' ? fx(...ROW_FX[r]) : '<span class="fx"></span>'}${r === 'raspberry' ? fx(...extra) : ''}</span>`;
       })
       .join('');
     return `<div class="orow ${hot('garden', r) ? 'hl' : ''}"${tattr('garden', r)} data-tip="${tip(GARDEN_NAMES[r], ROW_NAME_TIP[r])}">${ROW_ICON[r]}<div class="ocells">${cells}</div></div>`;
@@ -699,16 +789,16 @@ function renderSheet(): string {
     const pic = BARN_PICS[it] ?? '';
     return `<div class="item ${ready ? 'ready' : ''} ${hot('barn', it) ? 'hl' : ''} col${idx % 3}"${tattr('barn', it)} data-tip="${big}">
       <span class="nm">${d.name}</span><span class="bpic">${pic}</span>
-      <div class="cells">${d.cells.map((k, i) => cell(k, i < n)).join('')}</div>
+      <div class="cells">${d.cells.map((k, i) => cell(k, i < n, planX(i, bp.barn[it], n))).join('')}</div>
       <div class="btx">${BARN_SHORT[it]}</div>
       <span class="vpx">${d.vp ? rosette(d.vp) : '<small>особо</small>'}</span></div>`;
   }).join('')}</div></div>`;
 
   // ---- Шкалы и итог ----
   let g = '';
-  for (let i = 1; i <= GOODS_MAX; i++) g += `<div class="sq ${i % 5 === 0 ? 'star' : ''} ${i <= p.goods ? 'on' : ''}">${i % 5 === 0 ? '★' : ''}</div>`;
+  for (let i = 1; i <= GOODS_MAX; i++) g += `<div class="sq ${i % 5 === 0 ? 'star' : ''} ${i <= p.goods ? 'on' : ''} ${i > bp.goods && i <= p.goods ? 'plan' : ''}">${i % 5 === 0 ? '★' : ''}</div>`;
   let c = '';
-  for (let i = 1; i <= COMPOST_MAX; i++) c += `<div class="sq cp ${i <= p.compostSpent ? 'spent' : i <= p.compostGained ? 'on' : ''}"></div>`;
+  for (let i = 1; i <= COMPOST_MAX; i++) c += `<div class="sq cp ${i <= p.compostSpent ? 'spent' : i <= p.compostGained ? 'on' : ''} ${(i > bp.compostSpent && i <= p.compostSpent) || (i > bp.compostGained && i <= p.compostGained) ? 'plan' : ''}"></div>`;
   const scales = `<div class="box goodsbox" data-tip="${tip('Шкала товаров', 'Получая товары, закрашивайте клетки слева направо, сверху вниз. Закрасив клетку со звездой (каждая 5-я), немедленно выполните любое бонусное действие (кроме огорода). От числа товаров зависят бонусы фермерского рынка. Товары никогда не тратятся.')}"><h3 class="bt2">${ic.crate}Товары: ${p.goods}</h3><div class="grid15">${g}</div></div>
     <div class="box compostbox" data-tip="${tip('Шкала компоста', 'Компост можно потратить перед посадкой или поливом: каждая единица меняет значение кубика на 1 (1 можно уменьшить до 6, а 6 увеличить до 1).')}"><h3 class="bt2">${ic.compost}Компост: ${compostAvail(p)}</h3><div class="grid10">${c}</div></div>
     <div class="box scorebox"><h3 class="bt2">Итог</h3><table class="sc"><tbody>
@@ -756,9 +846,27 @@ function renderDock(): string {
     text = `${o.hint}: нажмите 🌱 или 💧 у грядки`;
   }
   const active = !!o && !['wait', 'over', 'rain', 'pick'].includes(o.kind);
-  if (active && !selection) {
+  if (active && !selection && !planComplete) {
     if (o!.canShovel) btns += `<button class="chip" data-a="shovel">Лопата −3</button>`;
     btns += `<button class="chip link" data-a="skip">Пропустить</button>`;
+  }
+  // План хода: сначала всё выбираем (видно заранее), потом подтверждаем; можно отменить шаг или начать ход заново
+  if (submitting) {
+    text = 'Отправляем ход…';
+    btns = '';
+    dieHtml = '';
+  } else if (pending.length && !over) {
+    const n = pending.length;
+    const word = n === 1 ? 'действие' : n < 5 ? 'действия' : 'действий';
+    const undo = `<button class="chip" data-a="undoplan">↩ Отменить шаг</button><button class="chip" data-a="resetplan">↺ Заново</button>`;
+    if (planComplete) {
+      text = `План хода готов (${n} ${word}). Изменения подсвечены синим — проверьте и нажмите «Подтвердить».`;
+      btns = `<button class="chip auto" data-a="confirmturn">✔ Подтвердить ход</button>${undo}`;
+      dieHtml = '';
+    } else {
+      text = `План: ${n} ${word} · ${text}`;
+      btns += undo;
+    }
   }
   return `<div class="dock"><div class="dtext">${dieHtml}<span>${esc(text).replace('🌱', ic.seedling).replace('💧', ic.can)}</span></div><div class="dbtns">${btns}</div></div>`;
 }
@@ -836,7 +944,7 @@ app.addEventListener('click', (ev) => {
       showResults = true;
       return render();
     case 'pick':
-      return act({ t: 'pick', cell: Number(v) });
+      return plan({ t: 'pick', cell: Number(v) });
     case 'plantbed': {
       const b = options?.plant?.find((x) => x.bed === Number(v));
       if (!b) return;
@@ -861,20 +969,26 @@ app.addEventListener('click', (ev) => {
       if (!selection) return;
       const s = selection;
       selection = null;
-      return act({ t: 'plant', bed: s.bed, crops: s.crops });
+      return plan({ t: 'plant', bed: s.bed, crops: s.crops });
     }
     case 'water':
-      return act({ t: 'water', bed: Number(v) });
+      return plan({ t: 'water', bed: Number(v) });
     case 'cell':
-      return act({ t: 'cell' });
+      return plan({ t: 'cell' });
     case 'target': {
       const slot = el.dataset.slot;
-      return act({ t: 'act', area: el.dataset.area as any, target: el.dataset.target!, ...(slot !== undefined ? { slot: Number(slot) } : {}) });
+      return plan({ t: 'act', area: el.dataset.area as any, target: el.dataset.target!, ...(slot !== undefined ? { slot: Number(slot) } : {}) });
     }
     case 'shovel':
-      return act({ t: 'shovel' });
+      return plan({ t: 'shovel' });
+    case 'confirmturn':
+      return confirmPlan();
+    case 'undoplan':
+      return undoLast();
+    case 'resetplan':
+      return resetPlan();
     case 'skip':
-      if (confirm('Пропустить это действие? Бонус пропадёт.')) act({ t: 'skip' });
+      if (confirm('Пропустить это действие? Бонус пропадёт.')) plan({ t: 'skip' });
       return;
   }
 });

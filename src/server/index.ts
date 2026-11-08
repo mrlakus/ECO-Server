@@ -227,6 +227,23 @@ function handle(ws: WebSocket, conn: Conn, raw: string) {
       broadcast(room);
       return;
     }
+    case 'batch': {
+      // Весь ход, спланированный на клиенте: применяем действия по порядку (так же, как если бы они приходили по одному).
+      const { room, member } = conn;
+      if (!room || !member || !room.game) return err('Игра не идёт');
+      const list: unknown[] = Array.isArray(msg.actions) ? msg.actions.slice(0, 60) : [];
+      let failed: string | null = null;
+      for (const a of list) {
+        const res = applyAction(room.game, member.id, a as Action, rng);
+        if (!res.ok) {
+          failed = res.error;
+          break;
+        }
+      }
+      if (failed) err(`Не удалось применить ход целиком: ${failed}`);
+      broadcast(room);
+      return;
+    }
     case 'proposeend': {
       const { room, member } = conn;
       if (!room || !member || !room.game) return err('Игра не идёт');

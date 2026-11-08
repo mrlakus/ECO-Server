@@ -599,3 +599,11 @@ body {
   background: #2f8a2f; color: #fff; font-size: calc(var(--u) * 1.4); line-height: 1; display: flex; align-items: center; justify-content: center; font-weight: 800; box-shadow: 0 .15em .3em rgba(0, 0, 0, .35);
 }
 @keyframes chosenglow { 50% { box-shadow: 0 0 0 calc(var(--u) * .5) rgba(79, 190, 60, .45), 0 0 calc(var(--u) * 2.2) calc(var(--u) * .5) rgba(120, 230, 80, .8); } }
+
+/* ---------- 3.0: план хода — запланированные клетки подсвечены синим ---------- */
+.cell.plan { border-color: #2a78b5 !important; background: #e3f1fc !important; box-shadow: 0 0 0 calc(var(--u) * .22) rgba(42, 120, 181, .5); animation: planpulse 1.2s ease-in-out infinite; }
+.cell.plan.on::after { color: #1e6aa8; }
+.crop.planned { box-shadow: 0 0 0 calc(var(--u) * .3) rgba(42, 120, 181, .45); border-color: #2a78b5; }
+.sy.planned .fl { filter: drop-shadow(0 0 .5em #2a78b5); }
+.sq.plan { background: #5fa8e0 !important; border-color: #2a78b5 !important; }
+@keyframes planpulse { 50% { box-shadow: 0 0 0 calc(var(--u) * .4) rgba(42, 120, 181, .3); } }
