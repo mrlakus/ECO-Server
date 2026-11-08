@@ -48,7 +48,7 @@ interface Session {
   token: string;
   name: string;
 }
-type Tab = 'board' | 'sheet' | 'players' | 'log';
+type Tab = 'board' | 'sheet';
 
 let ws: WebSocket | null = null;
 let session: Session | null = loadSession();
@@ -63,7 +63,7 @@ let selection: { bed: number; crops: string[]; max: number } | null = null;
 let pendingScroll: string | null = null;
 let lastOptionsKey = '';
 let retry = 0;
-let dockCollapsed = false;
+let showResults = true;
 
 const app = document.getElementById('app')!;
 
@@ -120,12 +120,12 @@ function onMessage(m: any) {
       you = m.you;
       state = m.state ?? null;
       options = m.options ?? null;
+      if (state?.phase !== 'over') showResults = true;
       if (!viewId || !state?.players.some((p) => p.id === viewId)) viewId = you;
       const key = options ? JSON.stringify([options.kind, options.die, options.hint, state?.round, state?.phase]) : '';
       if (key !== lastOptionsKey) {
         lastOptionsKey = key;
         selection = null;
-        dockCollapsed = false;
         if (options?.kind === 'pick') tab = 'board';
         else if (options && ['turn', 'act', 'field'].includes(options.kind) && tab === 'board' && state?.phase !== 'over') tab = 'sheet';
       }
@@ -171,7 +171,28 @@ const me = () => state?.players.find((p) => p.id === you) ?? null;
 const nameOf = (id: string) => state?.players.find((p) => p.id === id)?.name ?? '';
 let pendingName = '';
 const flowerOf = (c: string, on = true) => `<span class="fl ${on ? '' : 'off'}">${flower(FLOWER_COLORS[c])}</span>`;
-const plank = (icon: string, title: string, extra = '') => `<h3 class="plank"><span class="ttl">${icon}${title}</span>${extra ? `<small>${extra}</small>` : ''}</h3>`;
+
+/** Масштаб: вся сцена (180×106 «единиц») всегда целиком помещается в окно. */
+const STAGE_W = 180;
+const STAGE_H = 106;
+let portrait = false;
+function fit() {
+  const cs = getComputedStyle(document.documentElement);
+  const hh = parseFloat(cs.getPropertyValue('--hh')) || 46;
+  const dh = parseFloat(cs.getPropertyValue('--dh')) || 56;
+  const w = window.innerWidth - 4;
+  const h = window.innerHeight - hh - dh - 4;
+  const u = Math.max(2, Math.min(14, w / STAGE_W, h / STAGE_H));
+  document.documentElement.style.setProperty('--u', `${u.toFixed(3)}px`);
+  const p = window.innerHeight > window.innerWidth * 1.1;
+  if (p !== portrait) {
+    portrait = p;
+    if (state) render();
+  }
+}
+window.addEventListener('resize', fit);
+window.addEventListener('orientationchange', fit);
+fit();
 
 // ---------------------------------------------------------------------------
 // Экраны
@@ -182,10 +203,7 @@ function render() {
   if (!room) app.innerHTML = renderLobby();
   else if (!state) app.innerHTML = renderRoom();
   else app.innerHTML = renderGame();
-  if (pendingScroll) {
-    document.getElementById(pendingScroll)?.scrollIntoView({ block: 'center' });
-    pendingScroll = null;
-  } else window.scrollTo(0, scrollY);
+  window.scrollTo(0, scrollY);
 }
 
 const windowWrap = (inner: string) => `<div class="window"><div class="shutter"></div><div class="cork">${inner}</div><div class="shutter r"></div></div>`;
@@ -247,29 +265,19 @@ function renderGame(): string {
   const over = s.phase === 'over';
   const ev = ROUND_EVENTS[s.round - 1];
   const phaseName = { pick: 'Фаза садоводства', final: 'Последний кубик', event: `Событие: ${EVENT_NAMES[ev]}`, over: 'Конец игры' }[s.phase];
-  const mine = options && options.kind !== 'wait' && options.kind !== 'over';
   return `
-  <div class="top">
-    <div class="line"><span class="round">Раунд ${Math.min(s.round, ROUNDS)}/${ROUNDS}</span><span class="ev">${phaseName}</span>${connected ? '' : '<span class="ev">⚠ нет связи</span>'}</div>
-    ${options ? `<div class="hint ${mine ? 'mine' : ''}">${esc(options.hint)}</div>` : ''}
-  </div>
-  <nav class="tabs">
-    ${(
-      [
-        ['board', 'Поле'],
-        ['sheet', 'Планшет'],
-        ['players', 'Игроки'],
-        ['log', 'Журнал'],
-      ] as [Tab, string][]
-    )
-      .map(([t, l]) => `<button data-a="tab" data-v="${t}" class="${tab === t ? 'on' : ''}">${l}</button>`)
-      .join('')}
-  </nav>
-  <main class="${renderDock() ? 'hasdock' : ''}">
-    ${over ? renderResults() : ''}
-    ${tab === 'board' ? renderBoard() : tab === 'sheet' ? renderSheetTab() : tab === 'players' ? renderPlayers() : renderLog()}
-  </main>
-  ${renderDock()}`;
+  <header class="top">
+    <span class="round">Раунд ${Math.min(s.round, ROUNDS)}/${ROUNDS}</span>
+    <span class="ev">${phaseName}${connected ? '' : ' · ⚠ нет связи'}</span>
+    <nav class="tabs">
+      <button data-a="tab" data-v="board" class="${tab === 'board' ? 'on' : ''}">Поле</button>
+      <button data-a="tab" data-v="sheet" class="${tab === 'sheet' ? 'on' : ''}">Планшет</button>
+    </nav>
+  </header>
+  ${portrait ? '<div class="rotate-hint">↻ Поверните устройство горизонтально — так планшет виден крупнее</div>' : ''}
+  <main class="fit"><div class="stage">${tab === 'board' ? renderBoard() : renderSheet()}</div></main>
+  ${renderDock()}
+  ${over && showResults ? `<div class="overlay">${renderResults()}</div>` : ''}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -296,7 +304,8 @@ function renderBoard(): string {
     (e, i) =>
       `<div class="rd ${i + 1 === s.round ? 'cur' : i + 1 < s.round ? 'done' : ''}" title="${EVENT_NAMES[e]}"><b>${i + 1}</b><span class="ei">${EVENT_ICON[e]}</span><span class="el">${EVENT_LABEL[e]}</span></div>`,
   ).join('');
-  const cells = FIELD.map((f, i) => {
+  const noteHtml = (i: number) => {
+    const f = FIELD[i];
     const dice = s.field[i];
     const can = picking && options!.pickCells!.includes(i);
     const nt = NOTE[f.id];
@@ -305,7 +314,11 @@ function renderBoard(): string {
       <span class="dice">${dice.map((v) => die(v)).join('')}</span>
       ${s.edith === i ? `<span class="edith" title="Фишка Эдит">${ic.edith}</span>` : ''}
     </button>`;
-  }).join('');
+  };
+  // Раскладка как на оригинальном поле: верхний ряд слева направо, нижний — справа налево (по часовой стрелке)
+  const grid = [0, 1, 2, 3].map(noteHtml).join('') + [6, 5, 4].map(noteHtml).join('');
+  const marker = `<div class="note marker"><span class="nicons">🥇</span><span class="name">Первый игрок</span><b class="who">${esc(first.name)}</b></div>`;
+
   const myGoods = me()?.goods ?? 0;
   const fl = flower('#f4f1ea', '#cfc7b0');
   const rows = MARKET.map((r, i) => {
@@ -322,45 +335,28 @@ function renderBoard(): string {
       .join(' и ');
     return `<tr class="${cur ? 'you' : ''}"><td>${range}</td><td>${bonus}</td></tr>`;
   }).join('');
-  return `
-    ${windowWrap(`
-      <div class="paper rounds-paper"><h3 class="script">Шкала раундов</h3><div class="rounds">${rounds}</div>
-        <p class="legend">Первый игрок: <b>${esc(first.name)}</b> · Эдит на клетке ${s.edith + 1}</p></div>
-      <div class="field">${cells}</div>
-      <div class="paper torn market-paper"><div class="mtitle">Фермерский рынок</div>
-        <table class="market"><thead><tr><th>Товары</th><th>Бонусы</th></tr></thead><tbody>${rows}</tbody></table>
-        <p class="legend">${fl} — действие с многолетниками, ${ic.star} — бонусное действие. У вас ${myGoods} тов.</p></div>`)}
-    ${renderPlayersList()}`;
-}
-
-function renderPlayersList(): string {
-  const s = state!;
   const active = s.phase === 'pick' ? s.players[(s.first + s.pickPos) % s.players.length] : null;
-  return `<div class="pl-list">${s.players
+  const players = s.players
     .map((p) => {
       const sc = scorePlayer(p);
-      const busy = p.tasks.length > 0;
-      return `<div class="pl ${active === p || (s.phase !== 'pick' && busy) ? 'turn' : ''}">
-        <div><b>${esc(p.name)}</b>${p.id === you ? ' <small>(вы)</small>' : ''}${s.players[s.first] === p ? ' 🥇' : ''}</div>
-        <div class="stat"><span class="st">${ic.crate}${p.goods}</span><span class="st">${ic.compost}${compostAvail(p)}</span><span class="st sc">≈ ${sc.total} ПО</span></div></div>`;
+      const turn = active === p || (s.phase !== 'pick' && p.tasks.length > 0);
+      return `<button class="pl ${turn ? 'turn' : ''}" data-a="viewsheet" data-v="${p.id}"><b>${esc(p.name)}${p.id === you ? ' (вы)' : ''}</b>
+        <span class="stat"><span class="st">${ic.crate}${p.goods}</span><span class="st">${ic.compost}${compostAvail(p)}</span><span class="st sc">≈${sc.total}</span></span></button>`;
     })
-    .join('')}</div>`;
-}
+    .join('');
+  const log = [...s.log].reverse().slice(0, 9).map((l) => `<li class="${l.startsWith('—') ? 'sep' : ''}">${esc(l)}</li>`).join('');
 
-// ---------------------------------------------------------------------------
-// Игроки / журнал / итоги
-// ---------------------------------------------------------------------------
-
-function renderPlayers(): string {
-  return `${renderPlayersList()}<p class="legend">ПО — предварительный подсчёт «если бы игра закончилась сейчас». Откройте вкладку «Планшет» и выберите игрока сверху, чтобы посмотреть его участок.</p>`;
-}
-
-function renderLog(): string {
-  const s = state!;
-  return `<ul class="log">${[...s.log]
-    .reverse()
-    .map((l) => `<li class="${l.startsWith('—') ? 'sep' : ''}">${esc(l)}</li>`)
-    .join('')}</ul>`;
+  return `<div class="bboard">
+    <div class="bleft">${windowWrap(`
+      <div class="paper rounds-paper"><div class="rounds">${rounds}</div></div>
+      <div class="field">${grid}${marker}</div>`)}</div>
+    <div class="bside">
+      <div class="paper torn market-paper"><div class="mtitle">Фермерский рынок</div>
+        <table class="market"><thead><tr><th>Товары</th><th>Бонусы</th></tr></thead><tbody>${rows}</tbody></table></div>
+      <div class="pl-list">${players}</div>
+      <ul class="log">${log}</ul>
+    </div>
+  </div>`;
 }
 
 function renderResults(): string {
@@ -373,227 +369,200 @@ function renderResults(): string {
     })
     .join('');
   const win = s.winners.map(nameOf).join(' и ');
-  return `<div class="paper"><h3 class="script">🏆 Победил${s.winners.length > 1 ? 'и' : ''}: ${esc(win)}</h3>
+  return `<div class="paper results-card"><h3 class="script">🏆 Победил${s.winners.length > 1 ? 'и' : ''}: ${esc(win)}</h3>
     <table class="results"><thead><tr><th></th><th>Огород</th><th>Клумба</th><th>Пасека</th><th>Сад</th><th>Сарай</th><th>Итого</th></tr></thead><tbody>${rows}</tbody></table>
     ${room?.hostId === you ? '<button class="btn block" style="margin-top:10px" data-a="restart">Новая партия в этой комнате</button>' : '<p class="legend">Хозяин комнаты может начать новую партию.</p>'}
-    <button class="btn sec block" style="margin-top:8px" data-a="leave">Выйти</button></div>`;
+    <div class="row" style="margin-top:8px"><button class="btn sec" data-a="closeresults">Посмотреть планшеты</button><button class="btn sec" data-a="leave">Выйти</button></div></div>`;
 }
 
 // ---------------------------------------------------------------------------
-// Планшет игрока
+// Планшет игрока (всё на одном экране, расположение как у печатного листа)
 // ---------------------------------------------------------------------------
 
 const PEREN_TEXT: Record<string, string[]> = {
-  tulip: ['★ сад', 'перс. 2т', '—', 'перс. 3т', '—', '1 ПО/сбор'],
-  hydrangea: ['★ яблоки', '—', '★ ежев.', '★ малина', '★ перс.', '7 ПО'],
-  iris: ['+1 комп.', 'кубик ±1', '—', 'кубик ±2', '—', '12 ПО'],
-  hyacinth: ['2 тов.', '2 тов.', '—', '2 тов.', '—', '10 ПО'],
-  crocus: ['+2 комп.', '+1 комп.', '+1 комп.', '+2 комп.', '—', '6 ПО'],
-  narcissus: ['★ сарай', '—', '★ сарай', '★ сарай', '★ сарай', '4 ПО'],
+  tulip: ['★ бонус в саду', 'персики: 2 товара', '—', 'персики: 3 товара', '—', 'конец: 1 ПО за сбор фруктов/ягод (до 15)'],
+  hydrangea: ['★ яблоки', '—', '★ ежевика', '★ малина', '★ персики', 'конец: 7 ПО'],
+  iris: ['+1 компост', 'кубик ±1', '—', 'кубик ±1–2', '—', 'конец: 12 ПО'],
+  hyacinth: ['2 товара', '2 товара', '—', '2 товара', '—', 'конец: 10 ПО'],
+  crocus: ['+2 компоста', '+1 компост', '+1 компост', '+2 компоста', '—', 'конец: 6 ПО'],
+  narcissus: ['★ сарай', '—', '★ сарай', '★ сарай', '★ сарай', 'конец: 4 ПО'],
 };
-const MAIN_TEXT = ['', '★ сад', '', '★★ сад', ''];
-const WAX_TEXT = ['2 тов · 2 ПО', '4 тов · 2 ПО', '', '4 тов · 5 ПО'];
-const HONEY_TEXT = ['5 ПО', '5 ПО', '', '8 ПО'];
-const HIVE_TEXT = ['3 ПО', 'посадка', '★★★ сад', '2× пос./полив'];
-const ROW_TEXT: Record<GardenRow, string> = { apple: '3 ПО', peach: 'полив', blackberry: '2 ПО', raspberry: '3 тов.' };
+const PL: Record<string, string[]> = {
+  tulip: ['★', '2т', '', '3т', '', '≤15'],
+  hydrangea: ['★яб', '', '★еж', '★мал', '★пер', '7'],
+  iris: ['+1к', '±1', '', '±2', '', '12'],
+  hyacinth: ['2т', '2т', '', '2т', '', '10'],
+  crocus: ['+2к', '+1к', '+1к', '+2к', '', '6'],
+  narcissus: ['★ср', '', '★ср', '★ср', '★ср', '4'],
+};
+const MAIN_TXT = ['', '★', '', '★★', ''];
+const WAX_TXT = ['2т·2', '4т·2', '', '4т·5'];
+const HONEY_TXT = ['5', '5', '', '8'];
+const HIVE_TXT = ['3', 'пос.', '★★★', '2×'];
+const ROW_TXT: Record<GardenRow, string> = { apple: '3', peach: 'пол', blackberry: '2', raspberry: '3т' };
 const ROW_ICON: Record<GardenRow, string> = { apple: ic.apple, peach: ic.peach, blackberry: ic.blackberry, raspberry: ic.raspberry };
 
-function describeTarget(p: PlayerState, t: Target): string {
-  switch (t.area) {
-    case 'perennial': {
-      const i = PERENNIALS.indexOf(t.target as (typeof PERENNIALS)[number]);
-      return PEREN_TEXT[t.target][p.perennial[i]] || '';
-    }
-    case 'apiary': {
-      const tx = { main: MAIN_TEXT[p.main], wax: WAX_TEXT[p.wax], honey: HONEY_TEXT[p.honey], hive2: HIVE_TEXT[p.hive2] }[t.target as 'main'];
-      return tx || '';
-    }
-    case 'garden': {
-      const r = t.target as GardenRow;
-      return GARDEN_CELLS[r][p.garden[r]] === 'c' ? ROW_TEXT[r] : '—';
-    }
-    case 'barn': {
-      const d = BARN[t.target as (typeof BARN_ITEMS)[number]];
-      const n = p.barn[t.target as (typeof BARN_ITEMS)[number]];
-      return `${n + 1}/${d.cells.length}`;
-    }
-  }
+/** Какие места на планшете сейчас можно нажать (для текущего запроса игры). */
+function targetMap(): Map<string, number | undefined> {
+  const m = new Map<string, number | undefined>();
+  const o = options;
+  if (!o) return m;
+  if (o.kind === 'turn' && o.cellLeft) for (const t of [...(o.cellTargets ?? []), ...(o.mulchTargets ?? [])]) m.set(`${t.area}:${t.target}`, undefined);
+  if (o.kind === 'act') (o.slots ?? []).forEach((sl, i) => sl.targets.forEach((t) => !m.has(`${t.area}:${t.target}`) && m.set(`${t.area}:${t.target}`, i)));
+  return m;
 }
 
-function renderSheetTab(): string {
+function renderSheet(): string {
   const s = state!;
   const p = s.players.find((x) => x.id === viewId) ?? me()!;
+  const mineView = p.id === you;
+  const tmap = mineView ? targetMap() : new Map<string, number | undefined>();
+  const hot = (area: string, target: string) => tmap.has(`${area}:${target}`);
+  const tattr = (area: string, target: string) =>
+    hot(area, target) ? ` data-a="target" data-area="${area}" data-target="${target}"${tmap.get(`${area}:${target}`) !== undefined ? ` data-slot="${tmap.get(`${area}:${target}`)}"` : ''}` : '';
+  const sc = scorePlayer(p);
+
   const chips = s.players
     .map((x) => `<button class="${x.id === p.id ? 'on' : ''}" data-a="view" data-v="${x.id}">${esc(x.name)}${x.id === you ? ' (я)' : ''}</button>`)
     .join('');
-  const mineView = p.id === you;
-  return `
-  <div class="pchips">${chips}</div>
-  <div class="secnav"><a href="#sec-garden" data-a="nav" data-v="sec-garden">Огород</a><a href="#sec-per" data-a="nav" data-v="sec-per">Клумба</a><a href="#sec-api" data-a="nav" data-v="sec-api">Пасека</a><a href="#sec-orch" data-a="nav" data-v="sec-orch">Сад</a><a href="#sec-barn" data-a="nav" data-v="sec-barn">Сарай</a><a href="#sec-scale" data-a="nav" data-v="sec-scale">Шкалы</a></div>
-  ${renderGardenSection(p, mineView)}
-  ${renderPerennials(p)}
-  ${renderApiary(p)}
-  ${renderOrchard(p)}
-  ${renderBarn(p)}
-  ${renderScales(p)}`;
-}
 
-function cropHtml(p: PlayerState, id: string, mineView: boolean): string {
-  const i = Number(id.slice(1));
-  const type = id[0];
-  const n = type === 'c' ? CORN_CELLS : type === 'b' ? BEAN_CELLS : PUMPKINS[i].cells;
-  const f = type === 'c' ? p.corn[i] : type === 'b' ? p.beans[i] : p.pumpkins[i];
-  const head = type === 'c' ? ic.corn + rosette(3) : type === 'b' ? ic.bean + rosette(1) : ic.pumpkin + goodsBadge(PUMPKINS[i].goods);
-  const planting = mineView && selection && options?.plant?.find((b) => b.bed === selection!.bed)?.crops?.includes(id);
-  const chosen = selection?.crops.includes(id);
-  const cls = ['crop', type === 'c' ? 'corn' : type === 'b' ? 'bean' : 'pump', planting ? 'pick' : '', chosen ? 'chosen' : '', f >= n ? 'done' : ''].join(' ');
-  let cells = '';
-  for (let j = n - 1; j >= 0; j--) cells += cell(j === n - 1 ? 'c' : 's', j < f);
-  const attrs = planting ? `data-a="crop" data-v="${id}"` : 'disabled';
-  return `<button class="${cls}" ${attrs}><span class="lbl">${head}</span><span class="cc">${cells}</span>${type === 'p' ? `<small class="pno">#${i + 1}</small>` : ''}</button>`;
-}
-
-function renderGardenSection(p: PlayerState, mineView: boolean): string {
+  // ---- Огород ----
   const sel = selection;
-  const beds: string[] = [];
-  for (let b = 1; b <= BEDS; b++) {
-    const unitHtml = UNIT_BED.map((ub, i) => (ub === b ? `<div class="crop-pair">${cropHtml(p, `c${i}`, mineView)}${cropHtml(p, `b${i}`, mineView)}</div>` : '')).join('');
-    const pumpHtml = PUMPKINS.map((pk, i) => (pk.bed === b ? cropHtml(p, `p${i}`, mineView) : '')).join('');
-    const canPlant = mineView && !sel && options?.plant?.some((o) => o.bed === b);
-    const canWater = mineView && !sel && options?.water?.some((o) => o.bed === b);
-    beds.push(`<div class="bed ${canPlant || canWater ? 'ok' : ''} ${sel?.bed === b ? 'sel' : ''}" id="bed-${b}">
-      <div class="bhead"><span class="bnum">${b}</span>${die(b, 'sm')}</div><div class="crops">${unitHtml}${pumpHtml}</div></div>`);
-  }
-  const ring = PUMPKINS.map((pk, i) => {
-    const done = p.pumpkins[i] >= pk.cells;
-    const sy = PUMPKIN_SYMBOLS[i];
-    return `<span class="pk ${done ? 'done' : ''}">${ic.pumpkin}#${i + 1}</span><span class="sy ${p.symbols[i] ? 'on' : ''}" title="${PERENNIAL_NAMES[sy]}">${flowerOf(sy, p.symbols[i])}</span>`;
-  }).join('');
-  return `<section class="sec garden" id="sec-garden">${plank(ic.seedling, 'Огород', `${cornDone(p)} кукурузы · ${beansDone(p)} фасоли → ${cornDone(p) * 3 + beansDone(p)} ПО`)}
-    <div class="beds">${beds.join('')}</div>
-    <div class="ring"><b>Тыквы по кругу:</b> ${ring}</div>
-    <p class="legend">Тыквы #1…#12 идут по кругу, между соседними — цветок. Собрали две соседние — закрашиваете цветок и делаете действие с этим многолетником.</p></section>`;
-}
-
-function renderPerennials(p: PlayerState): string {
-  const cols = PERENNIALS.map((c, i) => {
-    const f = p.perennial[i];
-    let html = '';
-    for (let j = PERENNIAL_CELLS - 1; j >= 0; j--) html += `<div class="arow">${cell(j === 5 ? 'c' : 's', j < f)}</div><div class="tx">${PEREN_TEXT[c][j]}</div>`;
-    return `<div class="pcol" style="--fc:${FLOWER_COLORS[c]}"><div class="pfl">${flower(FLOWER_COLORS[c])}</div><h4>${PERENNIAL_NAMES[c]}</h4><div class="cc">${html}</div></div>`;
-  }).join('');
-  return `<section class="sec" id="sec-per">${plank(flower('#e8475a'), 'Клумба', 'снизу вверх')}<div class="per">${cols}</div></section>`;
-}
-
-function renderApiary(p: PlayerState): string {
-  const col = (title: string, n: number, cells: { kind: 's' | 'c'; txt: string }[], locked: boolean) => {
-    let html = '';
-    for (let j = cells.length - 1; j >= 0; j--) html += `<div class="arow">${cell(cells[j].kind, j < n)}</div><div class="tx">${cells[j].txt}</div>`;
-    return `<div class="acol ${locked ? 'lock' : ''}"><h4>${title}</h4>${html}</div>`;
+  const cellsRow = (n: number, f: number, dir: 'h' | 'v') => {
+    let h = '';
+    if (dir === 'h') for (let j = 0; j < n; j++) h += cell(j === n - 1 ? 'c' : 's', j < f);
+    else for (let j = n - 1; j >= 0; j--) h += cell(j === n - 1 ? 'c' : 's', j < f);
+    return h;
   };
-  const locked = p.main < APIARY_MAIN.length;
-  return `<section class="sec" id="sec-api">${plank(ic.bee, 'Пасека', locked ? 'остальные столбцы откроются после основного улья' : 'снизу вверх')}
-    <div class="apiary">
-      ${col('Основной улей', p.main, APIARY_MAIN.map((c, i) => ({ kind: c.kind, txt: MAIN_TEXT[i] })), false)}
-      ${col('Воск', p.wax, APIARY_WAX.map((c, i) => ({ kind: c.kind, txt: WAX_TEXT[i] })), locked)}
-      ${col('Мёд', p.honey, APIARY_HONEY.map((c, i) => ({ kind: c.kind, txt: HONEY_TEXT[i] })), locked)}
-      ${col('Деление семьи', p.hive2, APIARY_HIVE2.map((_, i) => ({ kind: 'c' as const, txt: HIVE_TEXT[i] })), locked)}
-    </div></section>`;
-}
+  const cropBtn = (id: string, inner: string, done: boolean) => {
+    const planting = mineView && sel && options?.plant?.find((b) => b.bed === sel.bed)?.crops?.includes(id);
+    const chosen = sel?.crops.includes(id);
+    return `<button class="crop ${planting ? 'pick' : ''} ${chosen ? 'chosen' : ''} ${done ? 'done' : ''}" ${planting ? `data-a="crop" data-v="${id}"` : 'disabled'}>${inner}</button>`;
+  };
+  const unit = (i: number) =>
+    `<div class="unit">${cropBtn(`c${i}`, `${ic.corn}${cellsRow(CORN_CELLS, p.corn[i], 'h')}${rosette(3)}`, p.corn[i] >= CORN_CELLS)}${cropBtn(`b${i}`, `${ic.bean}${cellsRow(BEAN_CELLS, p.beans[i], 'h')}${rosette(1)}`, p.beans[i] >= BEAN_CELLS)}</div>`;
+  const bedHtml = (b: number) => {
+    const plantOpt = mineView && !sel ? options?.plant?.find((o) => o.bed === b) : undefined;
+    const waterOpt = mineView && !sel ? options?.water?.find((o) => o.bed === b) : undefined;
+    const btns =
+      (plantOpt ? `<button class="bb" data-a="plantbed" data-v="${b}" title="Посадка">${ic.seedling}${plantOpt.cost ? `<i>−${plantOpt.cost}</i>` : ''}</button>` : '') +
+      (waterOpt ? `<button class="bb w" data-a="water" data-v="${b}" title="Полив">${ic.can}${waterOpt.cost ? `<i>−${waterOpt.cost}</i>` : ''}</button>` : '');
+    return `<div class="bed b${b} ${plantOpt || waterOpt ? 'ok' : ''} ${sel?.bed === b ? 'sel' : ''}" id="bed-${b}">
+      <div class="bh"><b class="bnum">${b}</b><span class="bact">${btns}</span>${die(b, 'sm')}</div>
+      <div class="units">${UNIT_BED.map((ub, i) => (ub === b ? unit(i) : '')).join('')}</div></div>`;
+  };
+  const pk = (i: number, dir: 'h' | 'v') => {
+    const d = PUMPKINS[i];
+    const f = p.pumpkins[i];
+    return `<div class="pk ${dir}">${cropBtn(`p${i}`, `${goodsBadge(d.goods)}${cellsRow(d.cells, f, dir)}<small class="bt">${d.bed}</small>`, f >= d.cells)}</div>`;
+  };
+  const sy = (i: number) => `<span class="sy" title="${PERENNIAL_NAMES[PUMPKIN_SYMBOLS[i]]}">${flowerOf(PUMPKIN_SYMBOLS[i], p.symbols[i])}</span>`;
+  // Кольцо тыкв по периметру: P0 слева-сверху, дальше по часовой стрелке в обратном порядке номеров
+  const top = [pk(0, 'h'), sy(11), pk(11, 'h'), sy(10), pk(10, 'h'), sy(9)];
+  const right = [pk(9, 'v'), sy(8), pk(8, 'v'), sy(7), pk(7, 'v'), sy(6)];
+  const bottom = [sy(3), pk(4, 'h'), sy(4), pk(5, 'h'), sy(5), pk(6, 'h')];
+  const left = [sy(0), pk(1, 'v'), sy(1), pk(2, 'v'), sy(2), pk(3, 'v')];
+  const garden = `<div class="garden">
+    <div class="rtop">${top.join('')}</div><div class="rleft">${left.join('')}</div>
+    <div class="beds">${[1, 2, 3, 6, 5, 4].map(bedHtml).join('')}</div>
+    <div class="rright">${right.join('')}</div><div class="rbot">${bottom.join('')}</div></div>`;
 
-function renderOrchard(p: PlayerState): string {
-  const rows = GARDEN_ROWS.map((r) => {
-    const cells = GARDEN_CELLS[r]
-      .map((k, i) => `<span class="gc">${cell(k, i < p.garden[r])}<span class="tx">${k === 'c' ? ROW_TEXT[r] : ''}</span></span>`)
-      .join('');
-    return `<div class="grow"><h4>${ROW_ICON[r]}${GARDEN_NAMES[r]}</h4>${cells}</div>`;
+  // ---- Клумба ----
+  const per = PERENNIALS.map((c, i) => {
+    const f = p.perennial[i];
+    let rowsH = '';
+    for (let j = PERENNIAL_CELLS - 1; j >= 0; j--) rowsH += `<div class="prow" title="${esc(PEREN_TEXT[c][j])}">${cell(j === 5 ? 'c' : 's', j < f)}<span class="tx">${PL[c][j]}</span></div>`;
+    return `<div class="pcol ${hot('perennial', c) ? 'hl' : ''}" style="--fc:${FLOWER_COLORS[c]}"${tattr('perennial', c)}><div class="ph">${flower(FLOWER_COLORS[c])}<span>${PERENNIAL_NAMES[c]}</span></div>${rowsH}</div>`;
   }).join('');
-  return `<section class="sec orchard" id="sec-orch">${plank(ic.apple, 'Сад', 'слева направо · малина: 1/2/3 ПО за 3/6/9-й сбор')}${rows}</section>`;
-}
 
-function renderBarn(p: PlayerState): string {
-  const items = BARN_ITEMS.map((it) => {
+  // ---- Пасека ----
+  const lockedApiary = p.main < APIARY_MAIN.length;
+  const acol = (id: string, title: string, n: number, cells: { kind: 's' | 'c'; txt: string }[], locked: boolean) => {
+    let h = '';
+    for (let j = cells.length - 1; j >= 0; j--) h += `<div class="prow">${cell(cells[j].kind, j < n)}<span class="tx">${cells[j].txt}</span></div>`;
+    return `<div class="acol ${locked ? 'lock' : ''} ${hot('apiary', id) ? 'hl' : ''}"${tattr('apiary', id)}><h4>${title}</h4>${h}</div>`;
+  };
+  const apiary = `<div class="box apiarybox"><h3 class="bt2">${ic.bee}Пасека</h3><div class="apiary">
+    ${acol('main', 'Улей', p.main, APIARY_MAIN.map((c, i) => ({ kind: c.kind, txt: MAIN_TXT[i] })), false)}
+    ${acol('wax', 'Воск', p.wax, APIARY_WAX.map((c, i) => ({ kind: c.kind, txt: WAX_TXT[i] })), lockedApiary)}
+    ${acol('honey', 'Мёд', p.honey, APIARY_HONEY.map((c, i) => ({ kind: c.kind, txt: HONEY_TXT[i] })), lockedApiary)}
+    ${acol('hive2', 'Семья', p.hive2, APIARY_HIVE2.map((_, i) => ({ kind: 'c' as const, txt: HIVE_TXT[i] })), lockedApiary)}</div></div>`;
+
+  // ---- Сад ----
+  const orchard = `<div class="box orchardbox"><h3 class="bt2">${ic.apple}Сад</h3>${GARDEN_ROWS.map((r) => {
+    const cells = GARDEN_CELLS[r]
+      .map((k, i) => `<span class="gc">${cell(k, i < p.garden[r], r === 'raspberry' && (i + 1) % 3 === 0 ? 'mark' : '')}<span class="tx">${k === 'c' ? ROW_TXT[r] : ''}</span></span>`)
+      .join('');
+    return `<div class="orow ${hot('garden', r) ? 'hl' : ''}"${tattr('garden', r)} title="${GARDEN_NAMES[r]}">${ROW_ICON[r]}<div class="ocells">${cells}</div></div>`;
+  }).join('')}</div>`;
+
+  // ---- Сарай ----
+  const barn = `<div class="box barnbox"><h3 class="bt2">${ic.barn}Сарай</h3><div class="barn">${BARN_ITEMS.map((it) => {
     const d = BARN[it];
     const n = p.barn[it];
     const ready = n >= d.cells.length;
-    const cells = d.cells.map((k, i) => cell(k, i < n)).join('');
-    const vp = d.vp ? rosette(d.vp) : '<small>особо</small>';
-    return `<div class="item ${ready ? 'ready' : ''}"><h4><span>${d.name}</span>${vp}</h4><div class="cells">${cells}</div><div class="tx">${d.desc}</div></div>`;
-  }).join('');
-  return `<section class="sec barnsec" id="sec-barn">${plank(ic.barn, 'Сарай', 'слева направо')}<div class="barn">${items}</div></section>`;
-}
+    return `<div class="item ${ready ? 'ready' : ''} ${hot('barn', it) ? 'hl' : ''}"${tattr('barn', it)} title="${esc(d.name)}: ${esc(d.desc)}">
+      <div class="in"><span>${d.name}</span>${d.vp ? rosette(d.vp) : '<small>особо</small>'}</div>
+      <div class="cells">${d.cells.map((k, i) => cell(k, i < n)).join('')}</div></div>`;
+  }).join('')}</div></div>`;
 
-function renderScales(p: PlayerState): string {
+  // ---- Шкалы и итог ----
   let g = '';
   for (let i = 1; i <= GOODS_MAX; i++) g += `<div class="sq ${i % 5 === 0 ? 'star' : ''} ${i <= p.goods ? 'on' : ''}">${i % 5 === 0 ? '★' : ''}</div>`;
   let c = '';
   for (let i = 1; i <= COMPOST_MAX; i++) c += `<div class="sq cp ${i <= p.compostSpent ? 'spent' : i <= p.compostGained ? 'on' : ''}"></div>`;
-  return `<section class="sec" id="sec-scale">${plank(ic.crate, 'Шкалы')}
-    <div class="scales"><div><b>${ic.crate}Товары: ${p.goods}</b> <small>каждая 5-я клетка — ★ бонусное действие</small><div class="grid15">${g}</div></div>
-    <div><b>${ic.compost}Компост: ${compostAvail(p)}</b> <small>(получено ${p.compostGained}, потрачено ${p.compostSpent})</small><div class="grid5">${c}</div></div></div></section>`;
+  const scales = `<div class="box goodsbox"><h3 class="bt2">${ic.crate}Товары: ${p.goods}</h3><div class="grid15">${g}</div></div>
+    <div class="box compostbox"><h3 class="bt2">${ic.compost}Компост: ${compostAvail(p)}</h3><div class="grid10">${c}</div></div>
+    <div class="box scorebox"><h3 class="bt2">Итог</h3><table class="sc"><tbody>
+      <tr><td>Огород</td><td>${sc.garden}</td></tr><tr><td>Клумба</td><td>${sc.perennials}</td></tr><tr><td>Пасека</td><td>${sc.apiary}</td></tr>
+      <tr><td>Сад</td><td>${sc.orchard}</td></tr><tr><td>Сарай</td><td>${sc.barn}</td></tr><tr class="tot"><td>Всего</td><td>${sc.total}</td></tr></tbody></table></div>`;
+
+  return `<div class="sheet">
+    <div class="pbar">${chips}<span class="legend2">крестики — закрашено · подсвеченные места можно нажимать</span></div>
+    <div class="panels">
+      <div class="gpanel">${garden}<div class="box perbox"><div class="per">${per}</div></div></div>
+      <div class="rpanel"><div class="rA"><div class="lcol">${apiary}${orchard}</div>${barn}</div><div class="rB">${scales}</div></div>
+    </div></div>`;
 }
 
 // ---------------------------------------------------------------------------
-// Панель действий
+// Нижняя панель (контекст + кнопки)
 // ---------------------------------------------------------------------------
-
-const AREA_ICON = { perennial: flower('#e8475a'), apiary: ic.bee, garden: ic.apple, barn: ic.barn } as const;
-
-function targetChips(p: PlayerState, targets: Target[], slot?: number, extra = ''): string {
-  return targets
-    .map(
-      (t) =>
-        `<button class="chip ${extra}" data-a="target" data-area="${t.area}" data-target="${t.target}" ${slot === undefined ? '' : `data-slot="${slot}"`}>${AREA_ICON[t.area]} ${esc(t.label)}<small>${esc(describeTarget(p, t))}</small></button>`,
-    )
-    .join('');
-}
-
-function bedChips(o: Options): string {
-  const costTxt = (c: number) => (c ? ` · −${c} комп.` : '');
-  const plant = (o.plant ?? []).map((b) => `<button class="chip ${b.cost ? 'cost' : ''}" data-a="plantbed" data-v="${b.bed}">${ic.seedling} Грядка ${b.bed}<small>посадка${costTxt(b.cost)}</small></button>`).join('');
-  const water = (o.water ?? []).map((b) => `<button class="chip water ${b.cost ? 'cost' : ''}" data-a="water" data-v="${b.bed}">${ic.can} Грядка ${b.bed}<small>полив ×${b.count}${costTxt(b.cost)}</small></button>`).join('');
-  return plant + water;
-}
 
 function renderDock(): string {
   const o = options;
-  const p = me();
-  if (!o || !p || state!.phase === 'over' || ['wait', 'over', 'rain', 'pick'].includes(o.kind)) {
-    if (o?.kind === 'pick') return '<div class="dock"><div class="dockhead"><b>👆 Выберите кубик на вкладке «Поле»</b></div></div>';
-    return '';
-  }
-  let body = '';
-  if (selection) {
+  const s = state!;
+  const over = s.phase === 'over';
+  let text = o?.hint ?? '';
+  let btns = '';
+  let dieHtml = '';
+  if (over) {
+    text = 'Партия окончена';
+    btns = `<button class="chip auto" data-a="openresults">Итоги</button>`;
+  } else if (selection) {
     const left = selection.max - selection.crops.length;
-    return `<div class="dock"><div class="dockhead"><b>🌱 Посадка · грядка ${selection.bed}</b><small>выберите культуры (${selection.crops.length}/${selection.max})</small></div>
-      <div class="chips"><button class="chip auto" data-a="confirmplant" ${selection.crops.length ? '' : 'disabled'}>✔ Посадить (${selection.crops.length})<small>${left > 0 ? `можно ещё ${left}` : 'максимум'}</small></button>
-      <button class="chip" data-a="cancelplant">✖ Отмена</button></div></div>`;
+    text = `Посадка на грядке ${selection.bed}: нажимайте культуры на планшете (${selection.crops.length}/${selection.max})${left > 0 ? '' : ' — максимум'}`;
+    btns = `<button class="chip auto" data-a="confirmplant" ${selection.crops.length ? '' : 'disabled'}>✔ Посадить</button><button class="chip" data-a="cancelplant">Отмена</button>`;
+  } else if (o && o.kind === 'pick') {
+    text = 'Ваш ход: нажмите на группу кубиков на общем поле';
+  } else if (o && o.kind === 'turn') {
+    dieHtml = die(o.die!, 'lg');
+    const shift = [o.compost ? `компост ${o.compost}` : '', o.irisShift ? `ирис ±${o.irisShift}` : ''].filter(Boolean).join(', ');
+    text = `Огород: нажмите 🌱 или 💧 у подсвеченной грядки · Клетка «${o.cellName}»${o.cellLeft ? '' : ' (готово)'}${shift ? ` · ${shift}` : ''}`;
+    if (o.cellLeft && o.cellKind === 'auto') btns += `<button class="chip auto" data-a="cell">${esc(o.autoLabel ?? '')}</button>`;
+    else if (o.cellLeft && o.cellKind === 'act') text += ' — выберите место на планшете';
+  } else if (o && o.kind === 'act') {
+    const sl = o.slots ?? [];
+    text = `${sl[0]?.label ?? 'Бонус'}${sl.length > 1 ? ` (+ ещё ${sl.length - 1})` : ''} — нажмите подсвеченное место на планшете`;
+  } else if (o && o.kind === 'field') {
+    text = `${o.hint}: нажмите 🌱 или 💧 у грядки`;
   }
-  if (o.kind === 'turn') {
-    const shift = [o.compost ? `компост: ${o.compost}` : '', o.irisShift ? `ирис ±${o.irisShift}` : ''].filter(Boolean).join(' · ');
-    body += `<div class="dockhead">${die(o.die!, 'lg')}<div><b>${esc(o.cellName ?? '')}</b><br><small>${shift || 'без сдвига кубика'}</small></div></div>`;
-    const garden = bedChips(o);
-    body += `<h4>Огород (грядка по значению кубика)</h4><div class="chips">${garden || '<small>нет доступных действий в огороде</small>'}</div>`;
-    if (o.cellLeft) {
-      if (o.cellKind === 'auto') body += `<h4>Клетка поля</h4><div class="chips"><button class="chip auto" data-a="cell">${esc(o.autoLabel ?? '')}</button></div>`;
-      else if (o.cellKind === 'act' && o.cellTargets?.length) body += `<h4>Клетка поля: ${esc(o.cellName ?? '')}</h4><div class="chips">${targetChips(p, o.cellTargets)}</div>`;
-      else if (o.cellKind === 'plantWater') body += `<h4>Клетка «Посадка или полив»</h4><small>Это второе действие в огороде — выберите его выше.</small>`;
-      if (o.mulchTargets?.length) body += `<h4>Мульча: вместо действия клетки — действие с многолетниками</h4><div class="chips">${targetChips(p, o.mulchTargets)}</div>`;
-    }
-  } else if (o.kind === 'act') {
-    (o.slots ?? []).forEach((sl, idx) => {
-      body += `<h4>${esc(sl.label)}</h4><div class="chips">${targetChips(p, sl.targets, idx)}</div>`;
-    });
-  } else if (o.kind === 'field') {
-    body += `<h4>${esc(o.hint)}</h4><div class="chips">${bedChips(o)}</div>`;
+  const active = !!o && !['wait', 'over', 'rain', 'pick'].includes(o.kind);
+  if (active && !selection) {
+    if (o!.canShovel) btns += `<button class="chip" data-a="shovel">Лопата −3</button>`;
+    btns += `<button class="chip link" data-a="skip">Пропустить</button>`;
   }
-  if (dockCollapsed) return '<div class="dock"><div class="chips"><button class="chip auto" data-a="dock">▲ Показать действия</button></div></div>';
-  const extras = [
-    '<button class="chip link" data-a="dock">▼ Свернуть панель</button>',
-    o.canShovel ? '<button class="chip" data-a="shovel">🪏 Лопата: 3 компоста → ★</button>' : '',
-    '<button class="chip link" data-a="skip">Пропустить</button>',
-  ].join('');
-  return `<div class="dock">${body}<div class="chips">${extras}</div></div>`;
+  return `<div class="dock"><div class="dtext">${dieHtml}<span>${esc(text).replace('🌱', ic.seedling).replace('💧', ic.can)}</span></div><div class="dbtns">${btns}</div></div>`;
 }
 
 // ---------------------------------------------------------------------------
@@ -644,10 +613,17 @@ app.addEventListener('click', (ev) => {
     case 'view':
       viewId = v;
       return render();
-    case 'nav':
-      ev.preventDefault();
-      document.getElementById(v)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      return;
+    case 'viewsheet':
+      viewId = v;
+      tab = 'sheet';
+      return render();
+    case 'closeresults':
+      showResults = false;
+      tab = 'sheet';
+      return render();
+    case 'openresults':
+      showResults = true;
+      return render();
     case 'pick':
       return act({ t: 'pick', cell: Number(v) });
     case 'plantbed': {
@@ -686,9 +662,6 @@ app.addEventListener('click', (ev) => {
     }
     case 'shovel':
       return act({ t: 'shovel' });
-    case 'dock':
-      dockCollapsed = !dockCollapsed;
-      return render();
     case 'skip':
       if (confirm('Пропустить это действие? Бонус пропадёт.')) act({ t: 'skip' });
       return;
