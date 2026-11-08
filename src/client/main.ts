@@ -443,7 +443,7 @@ function tk(t: string): string {
     case 'star':
       return `<span class="fxs">${ic.star}${TARGET_ICON[v] ?? ''}</span>`;
     case 'die':
-      return `<span class="fxd">${die(3, 'sm')}<b>${v}</b></span>`;
+      return `<span class="fxd">${ic.die}<b>${v}</b></span>`;
     case 'plant':
       return ic.seedling;
     case 'water':

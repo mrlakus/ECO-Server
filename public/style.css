@@ -440,3 +440,20 @@ main.fit { height: calc(100dvh - var(--hh) - var(--dh)); display: flex; align-it
 .bside .sy .fl .ic { width: calc(var(--u) * 1.9); height: calc(var(--u) * 1.9); }
 .bside .sn { font-size: calc(var(--u) * 1); padding: .05em .3em; }
 .bed { padding: .3em .6em .4em; row-gap: .2em; }
+
+/* ---------- Аккуратнее: клумба (Ирис) и грядки ---------- */
+.stage .fxd .ic { width: calc(var(--u) * 2); height: calc(var(--u) * 2); }
+.fxd { gap: calc(var(--u) * .2); }
+.bnum {
+  display: inline-flex; align-items: center; justify-content: center; width: calc(var(--u) * 3.6); height: calc(var(--u) * 3.6); border-radius: 50%;
+  background: #74492a; color: #fff3d6; font-size: calc(var(--u) * 2.5); line-height: 1; text-shadow: 0 .1em 0 rgba(0, 0, 0, .35);
+  box-shadow: inset 0 0 0 calc(var(--u) * .2) #b07a48, 0 calc(var(--u) * .15) calc(var(--u) * .3) rgba(0, 0, 0, .3);
+}
+.bed { background: linear-gradient(#c6e894, #b1d87e); }
+.bed.ok { background: linear-gradient(#fff6b8, #f1ec96); }
+.bmid { gap: .8em; }
+.btop, .bbot, .bside {
+  background: rgba(255, 253, 245, .8); border: calc(var(--u) * .2) solid #96673c; border-radius: .9em; box-shadow: 0 .15em .3em rgba(0, 0, 0, .18);
+}
+.bside { padding: .35em .3em; }
+.btop, .bbot { padding: .2em .5em; }

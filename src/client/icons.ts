@@ -66,6 +66,9 @@ export const ic = {
   edith: s(
     '<ellipse cx="12" cy="9.5" rx="9" ry="2.6" fill="#e8b23c" stroke="#7a560e" stroke-width="1"/><path d="M7.5 9c0-4 2-6.2 4.5-6.2S16.5 5 16.5 9z" fill="#f2c24c" stroke="#7a560e" stroke-width="1"/><circle cx="12" cy="12.4" r="3.6" fill="#f6c9a0" stroke="#8a5a30" stroke-width=".9"/><path d="M5 22c0-5 3-7.4 7-7.4s7 2.4 7 7.4z" fill="#4a86c4" stroke="#24508a" stroke-width="1"/><path d="M10.5 15.4l1.5 3 1.5-3" fill="#7fc15a" stroke="#3d7a22" stroke-width=".8"/>',
   ),
+  die: s(
+    '<rect x="2.5" y="2.5" width="19" height="19" rx="4.5" fill="#fff" stroke="#3d3d3d" stroke-width="1.7"/><g fill="#222"><circle cx="8" cy="8" r="1.7"/><circle cx="16" cy="8" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="8" cy="16" r="1.7"/><circle cx="16" cy="16" r="1.7"/></g>',
+  ),
   star: s('<path d="M12 2.8l2.7 6 6.5.6-4.9 4.4 1.5 6.4L12 16.8 6.2 20.2l1.5-6.4L2.8 9.4l6.5-.6z" fill="#f6c935" stroke="#a8800a" stroke-width="1"/>'),
 };
 
