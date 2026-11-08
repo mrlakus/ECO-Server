@@ -1,0 +1,17 @@
+{
+  "name": "Три сестры — онлайн",
+  "short_name": "Три сестры",
+  "description": "Онлайн-версия настольной игры «Три сестры» для 2–4 игроков",
+  "lang": "ru",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#cfe3c9",
+  "theme_color": "#4f9bd0",
+  "icons": [
+    { "src": "/art/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/art/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/art/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

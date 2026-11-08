@@ -743,3 +743,8 @@ main.fit.tall { height: auto; min-height: calc(100dvh - var(--hh)); overflow: vi
 .crop.planned { animation: plannedglow 1.4s ease-in-out infinite; }
 @keyframes plannedglow { 50% { box-shadow: 0 0 0 calc(var(--u) * .5) rgba(42, 120, 181, .25); } }
 @media (prefers-reduced-motion: reduce) { .cell.fresh, .sq.fresh, .dice.rolling .die, .dock.myturn, .crop.planned, .floater { animation: none !important; } }
+
+/* ---------- 3.9: установка ---------- */
+.howto { margin: 4px 0 8px; padding-left: 22px; line-height: 1.35; font-size: 1rem; }
+.howto li { margin-bottom: 6px; }
+@media (display-mode: standalone) { body { overscroll-behavior: none; } }

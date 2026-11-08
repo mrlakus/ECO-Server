@@ -88,6 +88,30 @@ let chatOpen = false;
 let chatUnread = 0;
 const REACTS = ['👍', '😄', '😮', '😢', '👏', '🔥', '🤔', '⏳'];
 const PHRASES = ['Ваш ход!', 'Подождите минуту', 'Хороший ход!', 'Ой, не туда нажал(а)', 'Спасибо за игру!'];
+// ---------- Установка как приложения (PWA) ----------
+interface InstallEvent extends Event { prompt(): Promise<void>; userChoice: Promise<{ outcome: string }> }
+let installEvent: InstallEvent | null = null;
+const isStandalone = () => window.matchMedia('(display-mode: standalone)').matches || (navigator as unknown as { standalone?: boolean }).standalone === true;
+const isIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  installEvent = e as InstallEvent;
+  const slot = document.getElementById('installslot');
+  if (slot) slot.innerHTML = installHtml();
+});
+window.addEventListener('appinstalled', () => {
+  installEvent = null;
+  const slot = document.getElementById('installslot');
+  if (slot) slot.innerHTML = '';
+  toast('Приложение установлено!');
+});
+function installHtml(): string {
+  if (isStandalone()) return '';
+  if (installEvent) return '<button class="btn sec block" data-a="install">📲 Установить как приложение</button>';
+  if (isIOS()) return '<button class="btn sec block" data-a="iosinstall">📲 Как установить на iPhone</button>';
+  return '';
+}
+if ('serviceWorker' in navigator) window.addEventListener('load', () => void navigator.serviceWorker.register('/sw.js').catch(() => {}));
 let wasActionable = false; // у вас было доступное действие в прошлом обновлении (чтобы уведомлять только о новом ходе)
 let firstUpdate = true; // первое обновление после (пере)подключения — не уведомляем
 
@@ -667,6 +691,7 @@ function renderLobby(): string {
         <button class="btn" data-a="join" style="flex:none">Войти</button>
       </div>
       <input type="text" id="joinpw" maxlength="32" placeholder="Пароль (если у комнаты есть)" autocomplete="off" style="margin-top:8px"></div>
+    <div id="installslot" style="margin:0">${installHtml()}</div>
     <div class="paper"><h3 class="script">Открытые комнаты <button class="btn sec mini" data-a="listrooms" title="Обновить список">↻</button></h3>
       <div id="roomlist">${renderRoomList()}</div></div>`)}
   </div>`;
@@ -1258,6 +1283,25 @@ app.addEventListener('click', (ev) => {
       return send({ type: 'listrooms' });
     case 'settings':
       return openSettings();
+    case 'install': {
+      if (!installEvent) return;
+      const ev = installEvent;
+      void ev.prompt();
+      void ev.userChoice.then(() => {
+        installEvent = null;
+        const slot = document.getElementById('installslot');
+        if (slot) slot.innerHTML = '';
+      });
+      return;
+    }
+    case 'iosinstall':
+      modalEl().innerHTML = `<div class="overlay vote"><div class="paper results-card"><h3 class="script">📲 Установка на iPhone</h3>
+        <ol class="howto"><li>Откройте эту страницу в <b>Safari</b> (в других браузерах на iPhone установка недоступна).</li>
+        <li>Нажмите кнопку <b>«Поделиться»</b> ⬆️ внизу экрана.</li>
+        <li>Выберите <b>«На экран “Домой”»</b> и нажмите <b>«Добавить»</b>.</li></ol>
+        <p class="legend">Игра откроется в полный экран, без адресной строки, как обычное приложение.</p>
+        <button class="btn block" data-a="closemodal">Понятно</button></div></div>`;
+      return;
     case 'joinroom': {
       return joinRoom(el.dataset.code!, el.dataset.locked === 'true');
     }
