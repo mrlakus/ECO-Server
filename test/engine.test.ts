@@ -135,3 +135,14 @@ test('первый раунд всегда начинается с клетки 
     assert.deepEqual(g.field[0].length > 0 && g.field[0][0] === lowest, true, `seed=${seed}`);
   }
 });
+
+test('fieldStart помнит исходную раскладку, даже когда кубики забрали', () => {
+  const rng = seeded(4);
+  const g = createGame([{ id: 'a', name: 'A' }, { id: 'b', name: 'B' }], rng);
+  assert.deepEqual(g.fieldStart, g.field);
+  const cell = g.field.findIndex((x) => x.length);
+  const before = g.field[cell].length;
+  assert.ok(applyAction(g, g.players[g.first].id, { t: 'pick', cell }, rng).ok);
+  assert.equal(g.field[cell].length, before - 1);
+  assert.equal(g.fieldStart[cell].length, before);
+});

@@ -355,3 +355,62 @@ main.fit { height: calc(100dvh - var(--hh) - var(--dh)); display: flex; align-it
   .chip { min-height: 30px; font-size: .8rem; padding: 0 10px; }
 }
 .rotate-hint { position: fixed; left: 8px; right: 8px; top: calc(var(--hh) + 6px); z-index: 25; background: #fbe97f; color: var(--ink2); border-radius: 6px; padding: 6px 10px; font-size: .85rem; font-weight: 700; text-align: center; box-shadow: 0 2px 6px rgba(0, 0, 0, .3); }
+
+/* ---------- Значки эффектов (вместо сокращений) ---------- */
+.fx { display: inline-flex; align-items: center; gap: calc(var(--u) * .15); vertical-align: middle; min-width: 0; }
+.stage .fx .ic { width: calc(var(--u) * 1.8); height: calc(var(--u) * 1.8); }
+.stage .fx .ros { width: calc(var(--u) * 1.7); height: calc(var(--u) * 2.05); }
+.stage .fx .ros b { font-size: calc(var(--u) * 1.1); top: .3em; }
+.stage .fx .gbadge { width: calc(var(--u) * 2.2); height: calc(var(--u) * 2); }
+.stage .fx .gbadge b { font-size: calc(var(--u) * 1.1); }
+.fxs { position: relative; display: inline-flex; align-items: center; gap: 0; }
+.stage .fxs .ic:first-child { width: calc(var(--u) * 1.7); height: calc(var(--u) * 1.7); }
+.stage .fxs .ic + .ic { width: calc(var(--u) * 1.6); height: calc(var(--u) * 1.6); margin-left: calc(var(--u) * -.25); }
+.fxc, .fxd { display: inline-flex; align-items: center; gap: calc(var(--u) * .1); }
+.fxc b, .fxd b, .fxx { font-size: calc(var(--u) * 1.45); font-weight: 800; color: var(--ink2); line-height: 1; }
+.stage .fxd .die { width: calc(var(--u) * 2.2); height: calc(var(--u) * 2.2); padding: .3em; }
+.stage .prow { min-height: calc(var(--u) * 2.5); }
+.stage .gc .fx { min-height: calc(var(--u) * 2); }
+.acol { overflow: hidden; }
+.item { overflow: hidden; }
+.item .btx { font-size: calc(var(--u) * 1.22); line-height: 1.12; color: #4a4333; }
+.item .btx .fx { margin: 0 calc(var(--u) * .1); }
+[data-tip] { cursor: zoom-in; }
+.hl { cursor: pointer; }
+
+/* ---------- Лупа-подсказка ---------- */
+#tip { position: fixed; z-index: 90; pointer-events: none; display: none; max-width: 380px; background: var(--paper); border: 3px solid var(--wood-d); border-radius: 12px; padding: 14px 16px; box-shadow: 0 10px 28px rgba(0, 0, 0, .45); font-size: 17px; line-height: 1.32; color: var(--ink); }
+#tip.show { display: block; }
+.tt h5 { font-family: var(--script); font-size: 25px; font-weight: 400; margin: 0 0 8px; color: var(--ink2); }
+.tt p { margin: 0; }
+.ttcells { display: flex; gap: 6px; align-items: center; margin: 4px 0 10px; }
+#tip .cell { width: 30px; height: 30px; border-width: 3px; font-size: 22px; }
+#tip .cell.on::after { font-size: 24px; }
+#tip .ros { width: 28px; height: 34px; }
+#tip .ros b { font-size: 16px; top: 6px; }
+
+/* Призрак забранного кубика: показывает, где он лежал */
+.die.ghost { opacity: .28; border-style: dashed; box-shadow: none; background: transparent; }
+
+.fs { background: none; border: 0; color: #fff; font-size: 1.35rem; padding: 0 8px; line-height: 1; text-shadow: 0 1px 0 rgba(0, 0, 0, .35); }
+
+/* ---------- Широкая раскладка (экраны шире обычного): занимает весь экран ---------- */
+.stage.wide { width: calc(var(--u) * 232); height: calc(var(--u) * 88); }
+.stage.wide .bboard { grid-template-columns: 142em 1fr; }
+.stage.wide .panels { grid-template-columns: 93em 35em 35em minmax(0, 1fr); grid-template-rows: 25em 30em 23em; gap: 2em; }
+.stage.wide .gpanel, .stage.wide .rpanel, .stage.wide .rA, .stage.wide .lcol, .stage.wide .rB { display: contents; }
+.stage.wide .garden { grid-area: 1 / 1 / 4 / 2; }
+.stage.wide .perbox { grid-area: 1 / 2 / 2 / 4; }
+.stage.wide .apiarybox { grid-area: 2 / 2 / 3 / 3; }
+.stage.wide .orchardbox { grid-area: 2 / 3 / 3 / 4; }
+.stage.wide .compostbox { grid-area: 3 / 2 / 4 / 3; }
+.stage.wide .goodsbox { grid-area: 3 / 3 / 4 / 4; }
+.stage.wide .barnbox { grid-area: 1 / 4 / 3 / 5; }
+.stage.wide .scorebox { grid-area: 3 / 4 / 4 / 5; }
+.stage.wide .sc, .stage.wide .sc tbody { display: block; }
+.stage.wide .sc tbody { display: grid; grid-template-columns: 1fr 1fr; column-gap: 3em; }
+.stage.wide .sc tr { display: flex; justify-content: space-between; }
+.stage .acol .prow { gap: calc(var(--u) * .25); }
+.stage .acol .fxx { font-size: calc(var(--u) * 1.2); }
+.stage .acol { padding: .4em .15em; }
+.legend2 { font-size: calc(var(--u) * 1.4); }

@@ -98,6 +98,7 @@ export function createGame(players: { id: string; name: string }[], rng: Rng, fi
     pickPos: 0,
     pickTaken: false,
     field: FIELD.map(() => []),
+    fieldStart: FIELD.map(() => []),
     edith: 0,
     finalDie: null,
     log: [],
@@ -135,6 +136,7 @@ function startRound(state: GameState, rng: Rng) {
     state.field[(state.edith + i) % FIELD.length] = g;
   });
   state.edith = (state.edith + groups.length) % FIELD.length;
+  state.fieldStart = state.field.map((g) => [...g]);
   logMsg(state, `— Раунд ${state.round}. Бросок: ${dice.join(' ')} —`);
 }
 

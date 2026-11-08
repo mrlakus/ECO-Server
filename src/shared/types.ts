@@ -58,6 +58,7 @@ export interface GameState {
   pickPos: number; // сколько игроков уже сходили в фазе садоводства
   pickTaken: boolean; // активный игрок уже взял кубик
   field: number[][]; // кубики на клетках поля (значения)
+  fieldStart: number[][]; // как кубики лежали в начале раунда (чтобы показывать «призраки» забранных)
   edith: number; // клетка, где стоит Эдит
   finalDie: { cell: number; value: number } | null;
   log: string[];
