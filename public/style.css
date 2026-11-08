@@ -497,3 +497,32 @@ body {
 .item .btx { font-size: calc(var(--u) * 1.1); line-height: 1.08; }
 .item .in { font-size: calc(var(--u) * 1.4); }
 .item .cells { gap: calc(var(--u) * .15); }
+
+/* ---------- 2.6: растения в грядках и картинки предметов сарая ---------- */
+.stage .garden { --c: calc(var(--u) * 1.55); }
+.plant { position: relative; display: inline-block; flex: none; width: calc(var(--u) * 3.3); height: calc(var(--u) * 3.9); }
+.plant .pic { display: block; width: 100%; height: 100%; }
+.plant .ros, .plant .gbadge { position: absolute; right: calc(var(--u) * -.4); bottom: calc(var(--u) * -.1); filter: drop-shadow(0 .1em .1em rgba(0, 0, 0, .35)); }
+.cs { display: inline-flex; gap: calc(var(--u) * .2); }
+.cs.v { flex-direction: column; }
+.pk.v .crop { flex-direction: row; align-items: center; }
+.garden .crop { gap: calc(var(--u) * .3); padding: .2em .45em .2em .3em; align-items: center; background: rgba(255, 253, 245, .9); }
+/* Грядка — вспаханная земля бороздами; ячейки лежат на светлых плашках */
+.stage .bed { background: repeating-linear-gradient(180deg, #a77c4d 0 .9em, #976e41 .9em 1.8em); }
+.stage .bed.ok { background: repeating-linear-gradient(180deg, #a77c4d 0 .9em, #976e41 .9em 1.8em); border-color: var(--gold); box-shadow: 0 0 0 .5em rgba(224, 169, 29, .55), inset 0 0 0 .2em #96673c; }
+.stage .bed.sel { background: repeating-linear-gradient(180deg, #a77c4d 0 .9em, #976e41 .9em 1.8em); }
+.item .in { align-items: flex-start; gap: calc(var(--u) * .4); }
+.item .in .nm { flex: 1; min-width: 0; }
+.item .bpic { flex: none; width: calc(var(--u) * 3.4); height: calc(var(--u) * 3.4); }
+.item .bpic .pic { display: block; width: 100%; height: 100%; }
+.stage.wide .item .bpic { width: calc(var(--u) * 4.4); height: calc(var(--u) * 4.4); }
+.ttpic { float: right; margin: 0 0 8px 12px; }
+.ttpic .pic { width: 96px; height: 96px; display: block; }
+.plant { height: calc(var(--u) * 3.7); }
+.stage.wide .item .bpic { width: calc(var(--u) * 3.8); height: calc(var(--u) * 3.8); }
+.plant { width: calc(var(--u) * 3.6); height: calc(var(--u) * 4.1); }
+.stage.wide .plant { width: calc(var(--u) * 4.6); height: calc(var(--u) * 5.2); }
+.plant { width: calc(var(--u) * 3.4); height: calc(var(--u) * 3.8); }
+.stage.wide .plant { width: calc(var(--u) * 3.9); height: calc(var(--u) * 4.3); }
+.stage.wide .plant { width: calc(var(--u) * 3.6); height: calc(var(--u) * 4.1); }
+.stage.wide .plant { width: calc(var(--u) * 3.4); height: calc(var(--u) * 3.9); }

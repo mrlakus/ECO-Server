@@ -33,6 +33,7 @@ import { beansDone, cornDone, scorePlayer, compostAvail, isPrepared } from '../s
 import type { Action, GameState, Options, PlayerState, Target } from '../shared/types';
 import { FLOWER_COLORS, flower, goodsBadge, ic, rosette } from './icons';
 import { VERSION } from '../shared/version';
+import { BARN_PICS, beanPlant, cornPlant, pumpkinPlant } from './plants';
 
 // ---------------------------------------------------------------------------
 // Состояние клиента
@@ -575,19 +576,23 @@ function renderSheet(): string {
     let h = '';
     if (dir === 'h') for (let j = 0; j < n; j++) h += cell(j === n - 1 ? 'c' : 's', j < f);
     else for (let j = n - 1; j >= 0; j--) h += cell(j === n - 1 ? 'c' : 's', j < f);
-    return h;
+    return `<span class="cs ${dir}">${h}</span>`;
   };
+  /** Картинка растения (растёт по мере полива) со значком очков/товаров в углу. */
+  const plantBox = (picSvg: string, badge: string) => `<span class="plant">${picSvg}${badge}</span>`;
   const cropBtn = (id: string, inner: string, done: boolean, tipHtml = '') => {
     const planting = mineView && sel && options?.plant?.find((b) => b.bed === sel.bed)?.crops?.includes(id);
     const chosen = sel?.crops.includes(id);
     return `<button class="crop ${planting ? 'pick' : ''} ${chosen ? 'chosen' : ''} ${done ? 'done' : ''}" ${planting ? `data-a="crop" data-v="${id}"` : 'disabled'} ${tipHtml ? `data-tip="${tipHtml}"` : ''}>${inner}</button>`;
   };
   const unit = (i: number) =>
-    `<div class="unit">${cropBtn(`c${i}`, `${ic.corn}${cellsRow(CORN_CELLS, p.corn[i], 'h')}${rosette(3)}`, p.corn[i] >= CORN_CELLS, tip('Кукуруза', 'Растёт на этой грядке: 4 ячейки. Каждый собранный урожай кукурузы приносит 3 ПО в конце игры.'))}${cropBtn(`b${i}`, `${ic.bean}${cellsRow(BEAN_CELLS, p.beans[i], 'h')}${rosette(1)}`, p.beans[i] >= BEAN_CELLS, tip('Фасоль', '2 ячейки. Сажать можно, только если на соседней кукурузе закрашены хотя бы 2 ячейки. Каждый собранный урожай фасоли приносит 1 ПО в конце игры.'))}</div>`;
+    `<div class="unit">${cropBtn(`c${i}`, `${plantBox(cornPlant(p.corn[i]), rosette(3))}${cellsRow(CORN_CELLS, p.corn[i], 'h')}`, p.corn[i] >= CORN_CELLS, tip('Кукуруза', 'Растёт на этой грядке: 4 ячейки. Каждый собранный урожай кукурузы приносит 3 ПО в конце игры.'))}${cropBtn(`b${i}`, `${plantBox(beanPlant(p.beans[i]), rosette(1))}${cellsRow(BEAN_CELLS, p.beans[i], 'h')}`, p.beans[i] >= BEAN_CELLS, tip('Фасоль', '2 ячейки. Сажать можно, только если на соседней кукурузе закрашены хотя бы 2 ячейки. Каждый собранный урожай фасоли приносит 1 ПО в конце игры.'))}</div>`;
   const pk = (i: number, dir: 'h' | 'v') => {
     const d = PUMPKINS[i];
     const f = p.pumpkins[i];
-    return `<div class="pk ${dir}">${cropBtn(`p${i}`, `${goodsBadge(d.goods)}${cellsRow(d.cells, f, dir)}`, f >= d.cells, tip(`Тыква #${i + 1} (грядка ${d.bed})`, `Собрав тыкву, вы сразу получаете ${d.goods} ${d.goods === 1 ? 'товар' : 'товара'}. Тыквы не приносят ПО. Собрав две соседние тыквы, закрасьте цветок между ними и сделайте действие с этим многолетником.`))}</div>`;
+    const level = f >= d.cells ? 4 : f <= 0 ? 0 : Math.min(3, Math.ceil((3 * f) / d.cells));
+    const pic = plantBox(pumpkinPlant(level), goodsBadge(d.goods));
+    return `<div class="pk ${dir}">${cropBtn(`p${i}`, dir === 'h' ? `${pic}${cellsRow(d.cells, f, dir)}` : `${cellsRow(d.cells, f, dir)}${pic}`, f >= d.cells, tip(`Тыква #${i + 1} (грядка ${d.bed})`, `Собрав тыкву, вы сразу получаете ${d.goods} ${d.goods === 1 ? 'товар' : 'товара'}. Тыквы не приносят ПО. Собрав две соседние тыквы, закрасьте цветок между ними и сделайте действие с этим многолетником.`))}</div>`;
   };
   /** Цветок между двумя соседними тыквами — с подписью, какой это многолетник. */
   const sy = (i: number) => {
@@ -662,9 +667,10 @@ function renderSheet(): string {
     const d = BARN[it];
     const n = p.barn[it];
     const ready = n >= d.cells.length;
-    const big = tip(d.name, d.desc, `<div class="ttcells">${d.cells.map((k, i) => cell(k, i < n)).join('')}${d.vp ? rosette(d.vp) : ''}</div>`);
+    const big = tip(d.name, d.desc, `<div class="ttpic">${BARN_PICS[it] ?? ''}</div><div class="ttcells">${d.cells.map((k, i) => cell(k, i < n)).join('')}${d.vp ? rosette(d.vp) : ''}</div>`);
+    const pic = BARN_PICS[it] ?? '';
     return `<div class="item ${ready ? 'ready' : ''} ${hot('barn', it) ? 'hl' : ''} col${idx % 3}"${tattr('barn', it)} data-tip="${big}">
-      <div class="in"><span>${d.name}</span>${d.vp ? rosette(d.vp) : '<small>особо</small>'}</div>
+      <div class="in"><span class="bpic">${pic}</span><span class="nm">${d.name}</span>${d.vp ? rosette(d.vp) : '<small>особо</small>'}</div>
       <div class="cells">${d.cells.map((k, i) => cell(k, i < n)).join('')}</div>
       <div class="btx">${BARN_SHORT[it]}</div></div>`;
   }).join('')}</div></div>`;
