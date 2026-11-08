@@ -34,8 +34,17 @@ interface Room {
   vote?: { by: string; yes: Set<string>; timer: NodeJS.Timeout };
   lastDecline: Record<string, number>;
   closed?: boolean;
+  overLogged?: boolean;
 }
 const rooms = new Map<string, Room>();
+
+// ---------- Журнал сервера (виден в Render → Logs) ----------
+const stamp = () => new Date().toISOString().replace('T', ' ').slice(0, 19);
+export const slog = (msg: string) => console.log(`[${stamp()}] ${msg}`);
+function deleteRoom(room: Room, why: string) {
+  if (!rooms.delete(room.code)) return;
+  slog(`комната ${room.code} закрыта: ${why}`);
+}
 
 const rng = () => randomInt(0, 2 ** 30) / 2 ** 30;
 const newId = () => randomBytes(4).toString('hex');
@@ -68,6 +77,12 @@ function publicRoom(room: Room) {
 
 function broadcast(room: Room) {
   room.touched = Date.now();
+  if (room.game?.phase === 'over' && !room.overLogged) {
+    room.overLogged = true;
+    const g = room.game;
+    const table = g.players.map((p, i) => `${p.name} ${g.scores?.[i]?.total ?? '?'}`).join(', ');
+    slog(`комната ${room.code}: партия окончена — победитель: ${g.winners.map((id) => g.players.find((p) => p.id === id)?.name).join(' и ')}; счёт: ${table}`);
+  }
   const pub = publicRoom(room);
   for (const m of room.members) {
     if (!m.socket) continue;
@@ -111,8 +126,8 @@ function checkVote(room: Room) {
   for (const m of room.members) {
     send(m.socket, { type: 'ended', message: 'Игра закончена досрочно: все игроки согласились' });
   }
-  console.log(`Комната ${room.code}: игра закончена досрочно по согласию`);
-  rooms.delete(room.code);
+  slog(`комната ${room.code}: партия закончена досрочно по согласию всех`);
+  deleteRoom(room, 'партия закончена досрочно');
 }
 const BOT_DELAY_MS = 1100;
 
@@ -185,6 +200,7 @@ function handle(ws: WebSocket, conn: Conn, raw: string) {
       const member: Member = { id: newId(), token: randomBytes(16).toString('hex'), name, socket: null };
       const room: Room = { code: newCode(), hostId: member.id, members: [member], game: null, touched: Date.now(), lastDecline: {} };
       rooms.set(room.code, room);
+      slog(`комната ${room.code} создана: хозяин «${name}»`);
       attach(ws, conn, room, member);
       return;
     }
@@ -193,7 +209,10 @@ function handle(ws: WebSocket, conn: Conn, raw: string) {
       if (!room) return err('Комната не найдена');
       // Переподключение по токену
       const existing = room.members.find((m) => m.token === msg.token);
-      if (existing) return attach(ws, conn, room, existing);
+      if (existing) {
+        slog(`комната ${room.code}: «${existing.name}» вернулся (переподключение)`);
+        return attach(ws, conn, room, existing);
+      }
       if (room.game) return err('Игра уже началась');
       if (room.members.length >= MAX_PLAYERS) return err('Комната заполнена');
       const name = cleanName(msg.name);
@@ -201,6 +220,7 @@ function handle(ws: WebSocket, conn: Conn, raw: string) {
       if (room.members.some((m) => m.name.toLowerCase() === name.toLowerCase())) return err('Такое имя уже занято в комнате');
       const member: Member = { id: newId(), token: randomBytes(16).toString('hex'), name, socket: null };
       room.members.push(member);
+      slog(`комната ${room.code}: «${name}» вошёл (игроков: ${room.members.length})`);
       attach(ws, conn, room, member);
       return;
     }
@@ -216,6 +236,7 @@ function handle(ws: WebSocket, conn: Conn, raw: string) {
         rng,
         first,
       );
+      slog(`комната ${room.code}: партия началась — люди: ${humans(room).map((m) => `«${m.name}»`).join(', ')}; ботов: ${room.members.filter((m) => m.bot).length}`);
       broadcast(room);
       return;
     }
@@ -327,10 +348,11 @@ function handle(ws: WebSocket, conn: Conn, raw: string) {
     case 'leave': {
       const { room, member } = conn;
       if (!room || !member) return;
+      slog(`комната ${room.code}: «${member.name}» вышел`);
       if (!room.game) {
         room.members = room.members.filter((m) => m !== member);
         if (room.hostId === member.id && humans(room).length) room.hostId = humans(room)[0].id;
-        if (!humans(room).length) rooms.delete(room.code);
+        if (!humans(room).length) deleteRoom(room, 'все вышли');
         else broadcast(room);
       } else {
         member.socket = null;
@@ -411,13 +433,14 @@ wss.on('connection', (ws) => {
     const { room, member } = conn;
     if (room && member && member.socket === ws) {
       member.socket = null;
+      slog(`комната ${room.code}: «${member.name}» отключился`);
       // В лобби отключившийся игрок остаётся 2 минуты на переподключение
       if (!room.game) {
         setTimeout(() => {
           if (member.socket || !rooms.has(room.code) || room.game) return;
           room.members = room.members.filter((m) => m !== member);
           if (room.hostId === member.id && humans(room).length) room.hostId = humans(room)[0].id;
-          if (!humans(room).length) rooms.delete(room.code);
+          if (!humans(room).length) deleteRoom(room, 'игроки не вернулись');
           else broadcast(room);
         }, 120000).unref();
       }
@@ -429,7 +452,19 @@ wss.on('connection', (ws) => {
 
 setInterval(() => {
   const now = Date.now();
-  for (const [code, room] of rooms) if (now - room.touched > ROOM_TTL_MS && room.members.every((m) => !m.socket)) rooms.delete(code);
+  for (const room of [...rooms.values()]) if (now - room.touched > ROOM_TTL_MS && room.members.every((m) => !m.socket)) deleteRoom(room, 'долго без активности');
 }, 10 * 60 * 1000).unref();
 
-server.listen(PORT, '0.0.0.0', () => console.log(`Три сестры: http://localhost:${PORT}`));
+// Раз в 5 минут — сводка: сколько комнат и игроков сейчас
+setInterval(() => {
+  if (!rooms.size) return;
+  let online = 0;
+  let playing = 0;
+  for (const r of rooms.values()) {
+    online += r.members.filter((m) => !m.bot && m.socket).length;
+    if (r.game && r.game.phase !== 'over') playing++;
+  }
+  slog(`сводка: комнат ${rooms.size} (в игре ${playing}), людей онлайн ${online}`);
+}, 5 * 60 * 1000).unref();
+
+server.listen(PORT, '0.0.0.0', () => slog(`Три сестры: сервер запущен, порт ${PORT}`));
