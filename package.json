@@ -1,6 +1,6 @@
 {
   "name": "three-sisters-online",
-  "version": "2.7.0",
+  "version": "2.8.0",
   "private": true,
   "description": "Онлайн-версия настольной игры «Три сестры» для 2–4 игроков",
   "type": "module",
@@ -11,7 +11,10 @@
     "dev": "concurrently -k -n server,client -c blue,green \"tsx watch src/server/index.ts\" \"esbuild src/client/main.ts --bundle --outfile=public/app.js --target=es2020 --watch\"",
     "test": "tsx --test test/*.test.ts",
     "typecheck": "tsc --noEmit",
-    "versions": "git log --reverse --format=\"%h  %ad  %s\" --date=format:\"%d.%m %H:%M\""
+    "versions": "git log --reverse --format=\"%h  %ad  %s\" --date=format:\"%d.%m %H:%M\"",
+    "build:server": "esbuild src/server/index.ts --bundle --platform=node --format=esm --packages=external --outfile=dist/server.mjs",
+    "build:prod": "npm run build:client && npm run build:server",
+    "start:prod": "node dist/server.mjs"
   },
   "dependencies": {
     "ws": "^8.18.0"
@@ -23,5 +26,8 @@
     "esbuild": "^0.25.0",
     "tsx": "^4.19.0",
     "typescript": "^5.6.0"
+  },
+  "engines": {
+    "node": ">=20"
   }
 }

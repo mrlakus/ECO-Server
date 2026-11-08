@@ -1,0 +1,13 @@
+# Настройки для Render (https://render.com). Использование: New + → Blueprint → выбрать этот репозиторий.
+services:
+  - type: web
+    name: tri-sestry
+    runtime: node
+    plan: free
+    branch: claude/mobile-code-optimization-0m02dg
+    buildCommand: npm install --include=dev && npm run build:prod
+    startCommand: npm run start:prod
+    healthCheckPath: /healthz
+    envVars:
+      - key: NODE_VERSION
+        value: "22"

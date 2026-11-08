@@ -1,4 +1,5 @@
 import http from 'node:http';
+import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { randomBytes, randomInt } from 'node:crypto';
 import path from 'node:path';
@@ -10,7 +11,9 @@ import type { Action, GameState } from '../shared/types';
 import { MAX_PLAYERS, MIN_PLAYERS } from '../shared/data';
 import { DECLINE_COOLDOWN_MS, VOTE_TIMEOUT_MS, waitingFor } from './vote';
 
-const PUBLIC_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../public');
+// Папка public: рядом с исходниками (src/server → ../../public) или рядом с собранным файлом (dist → ../public)
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const PUBLIC_DIR = [path.resolve(HERE, '../../public'), path.resolve(HERE, '../public')].find((d) => existsSync(path.join(d, 'index.html'))) ?? path.resolve(HERE, '../../public');
 const PORT = Number(process.env.PORT ?? 3000);
 const ROOM_TTL_MS = 6 * 60 * 60 * 1000;
 
