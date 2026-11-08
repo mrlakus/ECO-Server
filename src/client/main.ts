@@ -36,6 +36,7 @@ import { VERSION } from '../shared/version';
 import { BARN_PICS, beanPlant, cornPlant, pumpkinPlant } from './plants';
 import { SCENES } from './scenes';
 import { music } from './music';
+import { browserNotifySupported, chime, enableBrowserNotifications, notifyTurn, prefs, savePrefs } from './notify';
 
 // ---------------------------------------------------------------------------
 // Состояние клиента
@@ -80,6 +81,8 @@ interface RoomItem { code: string; host: string; players: number; max: number; s
 let roomList: RoomItem[] = [];
 let myRoomPassword = ''; // пароль, который хозяин задал при создании (показываем ему, чтобы мог сообщить друзьям)
 let pendingPwRoom = ''; // комната, в которую вводим пароль
+let wasActionable = false; // у вас было доступное действие в прошлом обновлении (чтобы уведомлять только о новом ходе)
+let firstUpdate = true; // первое обновление после (пере)подключения — не уведомляем
 
 const app = document.getElementById('app')!;
 
@@ -105,6 +108,7 @@ function connect() {
   ws = new WebSocket(`${proto}://${location.host}/ws`);
   ws.onopen = () => {
     connected = true;
+    firstUpdate = true;
     retry = 0;
     if (session) send({ type: 'join', code: session.code, token: session.token, name: session.name });
     render();
@@ -214,6 +218,12 @@ function onMessage(m: any) {
       serverState = m.state ?? null;
       serverOptions = m.options ?? null;
       submitting = false;
+      {
+        const actionable = !!serverOptions && !!serverState && serverState.phase !== 'over' && ['pick', 'turn', 'act', 'field'].includes(serverOptions.kind);
+        if (actionable && !wasActionable && !firstUpdate) notifyTurn();
+        wasActionable = actionable;
+        firstUpdate = false;
+      }
       recompute();
       if (state?.phase !== 'over') showResults = true;
       if (!viewId || !state?.players.some((p) => p.id === viewId)) viewId = you;
@@ -341,6 +351,16 @@ function joinRoom(code: string, locked: boolean, password = '') {
   send({ type: 'join', code, name, password });
 }
 const modalEl = () => document.getElementById('modal')!;
+function openSettings() {
+  const row = (id: string, label: string, checked: boolean, disabled = false, hint = '') =>
+    `<label class="setrow ${disabled ? 'off' : ''}"><input type="checkbox" data-pref="${id}" ${checked ? 'checked' : ''} ${disabled ? 'disabled' : ''}><span>${label}${hint ? `<small>${hint}</small>` : ''}</span></label>`;
+  const bn = browserNotifySupported();
+  modalEl().innerHTML = `<div class="overlay vote"><div class="paper results-card"><h3 class="script">⚙ Настройки</h3>
+    ${row('notifySound', 'Звук, когда пришёл ваш ход или сообщение', prefs.notifySound)}
+    ${row('notifyVibrate', 'Вибрация на телефоне', prefs.notifyVibrate, false, 'срабатывает, когда вкладка не открыта (на iPhone не поддерживается)')}
+    ${row('notifyBrowser', 'Уведомления браузера', prefs.notifyBrowser, !bn, bn ? 'когда вкладка не открыта; браузер спросит разрешение' : 'ваш браузер их не поддерживает')}
+    <div class="row" style="margin-top:12px"><button class="btn sec" data-a="testsound">🔔 Проверить звук</button><button class="btn" data-a="closemodal">Готово</button></div></div></div>`;
+}
 function closeModal() {
   modalEl().innerHTML = '';
   pendingPwRoom = '';
@@ -356,13 +376,32 @@ function openPasswordModal(code: string, message = '') {
 document.addEventListener('click', (e) => {
   const el = (e.target as HTMLElement).closest<HTMLElement>('#modal [data-a]');
   if (!el) return;
-  if (el.dataset.a === 'pwcancel') closeModal();
+  if (el.dataset.a === 'pwcancel' || el.dataset.a === 'closemodal') closeModal();
+  if (el.dataset.a === 'testsound') chime();
   if (el.dataset.a === 'pwok') {
     const pw = (document.getElementById('modalpw') as HTMLInputElement).value.trim();
     if (!pw) return toast('Введите пароль');
     const code = pendingPwRoom;
     joinRoom(code, true, pw);
   }
+});
+document.addEventListener('change', async (e) => {
+  const t = e.target as HTMLInputElement;
+  const key = t.dataset?.pref as keyof typeof prefs | undefined;
+  if (!key || !t.closest('#modal')) return;
+  if (key === 'notifyBrowser') {
+    if (t.checked) {
+      const ok = await enableBrowserNotifications();
+      t.checked = ok;
+      if (!ok) toast('Браузер не разрешил уведомления. Разрешите их в настройках сайта.');
+    } else {
+      prefs.notifyBrowser = false;
+      savePrefs();
+    }
+    return;
+  }
+  prefs[key] = t.checked;
+  savePrefs();
 });
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && (e.target as HTMLElement).id === 'modalpw') (document.querySelector('#modal [data-a="pwok"]') as HTMLElement | null)?.click();
@@ -372,7 +411,8 @@ document.addEventListener('keydown', (e) => {
 /** Кнопка включения музыки и ползунок громкости (показываются в меню). */
 function musicWidget(): string {
   return `<div class="music"><button class="mbtn" data-a="music" aria-pressed="${music.on}" title="${music.on ? 'Выключить музыку' : 'Включить музыку'}">${music.on ? '🎵' : '🔇'}</button>
-    <input type="range" id="vol" min="0" max="100" value="${Math.round(music.vol * 100)}" aria-label="Громкость музыки" ${music.on ? '' : 'disabled'}></div>`;
+    <input type="range" id="vol" min="0" max="100" value="${Math.round(music.vol * 100)}" aria-label="Громкость музыки" ${music.on ? '' : 'disabled'}>
+    <button class="mbtn gear" data-a="settings" title="Настройки уведомлений">⚙</button></div>`;
 }
 
 function render() {
@@ -470,6 +510,7 @@ function renderGame(): string {
     <span class="round">Раунд ${Math.min(s.round, ROUNDS)}/${ROUNDS}</span>
     <span class="ev">${phaseName}${connected ? '' : ' · ⚠ нет связи'}</span>
     <span class="ver" title="Версия приложения">v${VERSION}</span>
+    <button class="hbtn gearbtn" data-a="settings" title="Настройки">⚙</button>
     ${over ? '' : '<button class="hbtn" data-a="proposeend" title="Предложить всем закончить игру и выйти в меню">🏳 <span>Закончить игру</span></button>'}
     ${document.fullscreenEnabled ? `<button class="fs" data-a="fullscreen" title="На весь экран">${document.fullscreenElement ? '✕' : '⛶'}</button>` : ''}
     <nav class="tabs">
@@ -996,6 +1037,8 @@ app.addEventListener('click', (ev) => {
     }
     case 'listrooms':
       return send({ type: 'listrooms' });
+    case 'settings':
+      return openSettings();
     case 'joinroom': {
       return joinRoom(el.dataset.code!, el.dataset.locked === 'true');
     }

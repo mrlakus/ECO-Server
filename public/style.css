@@ -689,3 +689,11 @@ main.fit.tall { height: auto; min-height: calc(100dvh - var(--hh)); overflow: vi
 .rm.busy { opacity: .65; }
 .rm .btn { min-height: 38px; padding: 0 14px; flex: none; }
 .btn.mini { min-height: 28px; padding: 0 10px; font-size: .95rem; margin-left: 8px; vertical-align: middle; }
+
+/* ---------- 3.5: настройки и уведомления ---------- */
+.mbtn.gear { background: #b8a77f; box-shadow: 0 2px 0 #8a7a55; font-size: 1.1rem; }
+.hbtn.gearbtn { padding: 3px 10px; font-size: 1rem; }
+.setrow { display: flex; align-items: flex-start; gap: 10px; padding: 8px 4px; border-bottom: 1px dotted #c9b98c; font-size: 1rem; cursor: pointer; }
+.setrow input { width: 22px; height: 22px; margin-top: 2px; flex: none; accent-color: var(--green); }
+.setrow small { display: block; color: var(--muted); font-size: .8rem; line-height: 1.15; }
+.setrow.off { opacity: .55; }
