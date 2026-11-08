@@ -6,8 +6,9 @@ export interface Prefs {
   notifySound: boolean; // короткий звук, когда пришёл ваш ход / новое сообщение
   notifyVibrate: boolean; // вибрация на телефоне (когда вкладка не в фокусе)
   notifyBrowser: boolean; // системное уведомление браузера (когда вкладка не в фокусе)
+  sfx: boolean; // звуки игры: кубики, посадка, полив, урожай
 }
-const DEFAULTS: Prefs = { notifySound: true, notifyVibrate: true, notifyBrowser: false };
+const DEFAULTS: Prefs = { notifySound: true, notifyVibrate: true, notifyBrowser: false, sfx: true };
 
 function load(): Prefs {
   try {

@@ -36,6 +36,7 @@ import { VERSION } from '../shared/version';
 import { BARN_PICS, beanPlant, cornPlant, pumpkinPlant } from './plants';
 import { SCENES } from './scenes';
 import { music } from './music';
+import { sfx } from './sfx';
 import { browserNotifySupported, chime, enableBrowserNotifications, notifyChat, notifyTurn, prefs, savePrefs } from './notify';
 
 // ---------------------------------------------------------------------------
@@ -167,10 +168,25 @@ function plan(action: Action) {
   const r = previewAction(test, you, action);
   if (!r.ok) return toast(r.error);
   pending.push(action);
+  const before = state;
   selection = null;
   recompute();
   autoTab();
   render();
+  // звук и всплеск сразу в момент выбора
+  if (action.t === 'pick') sfx('pick');
+  else if (before && state) {
+    const mine0 = before.players.find((x) => x.id === you);
+    const mine1 = state.players.find((x) => x.id === you);
+    if (mine0 && mine1) {
+      const c = diffPlayer(mine0, mine1);
+      if (c.harvested || c.fruit) {
+        sfx('harvest');
+        sparkle('✨');
+      } else if (c.planted) sfx('plant');
+      else if (c.watered) sfx('water');
+    }
+  }
 }
 function undoLast() {
   if (submitting) return;
@@ -191,6 +207,7 @@ function resetPlan() {
 function confirmPlan() {
   if (!pending.length || !planComplete || submitting) return;
   submitting = true;
+  sfx('confirm');
   send({ type: 'batch', actions: pending });
   pending = [];
   selection = null;
@@ -238,6 +255,11 @@ function onMessage(m: any) {
     case 'update': {
       room = m.room;
       you = m.you;
+      {
+        const prevState = serverState;
+        const newState = (m.state ?? null) as GameState | null;
+        if (prevState || !state) reactToUpdate(prevState && newState && prevState.players.length === newState.players.length ? prevState : null, newState);
+      }
       serverState = m.state ?? null;
       serverOptions = m.options ?? null;
       submitting = false;
@@ -370,6 +392,77 @@ fit();
 // Экраны
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// События игры: что изменилось между двумя состояниями (для звуков и анимаций)
+// ---------------------------------------------------------------------------
+interface Changes { planted: number; watered: number; harvested: number; fruit: number }
+function diffPlayer(a: PlayerState, b: PlayerState): Changes {
+  const c: Changes = { planted: 0, watered: 0, harvested: 0, fruit: 0 };
+  const crop = (x: number, y: number, full: number) => {
+    if (y <= x) return;
+    if (x === 0) c.planted++;
+    else c.watered++;
+    if (y >= full && x < full) c.harvested++;
+  };
+  a.corn.forEach((x, i) => crop(x, b.corn[i], CORN_CELLS));
+  a.beans.forEach((x, i) => crop(x, b.beans[i], BEAN_CELLS));
+  a.pumpkins.forEach((x, i) => crop(x, b.pumpkins[i], PUMPKINS[i].cells));
+  for (const r of GARDEN_ROWS) c.fruit += Math.max(0, b.garden[r] - a.garden[r]);
+  return c;
+}
+let freshPrev: Record<string, PlayerState> = {};
+let freshUntil = 0;
+let freshTimer: number | undefined;
+let rollUntil = 0;
+function markFresh(prev: GameState) {
+  freshPrev = Object.fromEntries(prev.players.map((p) => [p.id, p]));
+  freshUntil = Date.now() + 1400;
+  clearTimeout(freshTimer);
+  freshTimer = window.setTimeout(() => {
+    freshPrev = {};
+    rollUntil = 0;
+    render();
+  }, 1450);
+}
+function sparkle(text: string) {
+  showFloater({ id: 0, from: '', name: '', text, kind: 'react', at: Date.now() });
+}
+/** Звуки/анимации для изменений между двумя состояниями сервера. */
+function reactToUpdate(prev: GameState | null, next: GameState | null) {
+  if (!next) return;
+  const startedNow = !prev;
+  if (startedNow || next.round !== prev!.round) {
+    rollUntil = Date.now() + 1000;
+    sfx('roll');
+    clearTimeout(freshTimer);
+    freshTimer = window.setTimeout(() => {
+      rollUntil = 0;
+      render();
+    }, 1050);
+  }
+  if (!prev) return;
+  let any = false;
+  for (const np of next.players) {
+    const pp = prev.players.find((x) => x.id === np.id);
+    if (!pp) continue;
+    const c = diffPlayer(pp, np);
+    const own = np.id === you;
+    if (own) continue; // свои действия уже озвучены и подсвечены в момент выбора
+    if (c.harvested || c.fruit) {
+      sfx('harvest', own);
+      if (!own) sparkle('✨');
+      any = true;
+    } else if (c.planted) {
+      sfx('plant', own);
+      any = true;
+    } else if (c.watered) {
+      sfx('water', own);
+      any = true;
+    }
+  }
+  if (any) markFresh(prev);
+}
+
 function joinRoom(code: string, locked: boolean, password = '') {
   const name = (document.getElementById('name') as HTMLInputElement | null)?.value.trim() || session?.name || localStorage.getItem('ts-name') || '';
   if (!name) return toast('Введите имя (в поле «Ваше имя»)');
@@ -478,6 +571,7 @@ function openSettings() {
   const bn = browserNotifySupported();
   modalEl().innerHTML = `<div class="overlay vote"><div class="paper results-card"><h3 class="script">⚙ Настройки</h3>
     ${row('notifySound', 'Звук, когда пришёл ваш ход или сообщение', prefs.notifySound)}
+    ${row('sfx', 'Звуки игры (кубики, посадка, полив, урожай)', prefs.sfx)}
     ${row('notifyVibrate', 'Вибрация на телефоне', prefs.notifyVibrate, false, 'срабатывает, когда вкладка не открыта (на iPhone не поддерживается)')}
     ${row('notifyBrowser', 'Уведомления браузера', prefs.notifyBrowser, !bn, bn ? 'когда вкладка не открыта; браузер спросит разрешение' : 'ваш браузер их не поддерживает')}
     <div class="row" style="margin-top:12px"><button class="btn sec" data-a="testsound">🔔 Проверить звук</button><button class="btn" data-a="closemodal">Готово</button></div></div></div>`;
@@ -712,7 +806,7 @@ function renderBoard(): string {
       <span class="n">${i + 1}</span><span class="name">${esc(f.name)}</span>
       <span class="scene-wrap">${SCENES[f.id] ?? ''}</span>
       <span class="ntx">${noteText(f.id)}</span>
-      <span class="dice">${dice.map((v) => die(v)).join('')}${Array.from({ length: ghosts }, () => die(ghostVal, 'ghost')).join('')}</span>
+      <span class="dice ${Date.now() < rollUntil ? 'rolling' : ''}">${dice.map((v) => die(v)).join('')}${Array.from({ length: ghosts }, () => die(ghostVal, 'ghost')).join('')}</span>
       ${s.edith === i ? `<span class="edith" title="Фишка Эдит">${ic.edith}</span>` : ''}
     </button>`;
   };
@@ -927,8 +1021,10 @@ function renderSheet(): string {
     hot(area, target) ? ` data-a="target" data-area="${area}" data-target="${target}"${tmap.get(`${area}:${target}`) !== undefined ? ` data-slot="${tmap.get(`${area}:${target}`)}"` : ''}` : '';
   const sc = scorePlayer(p);
   // «База» — как лист выглядит у сервера; отличия от неё показываем как запланированные (синим)
-  const bp = pending.length && p.id === you && serverState ? (serverState.players.find((x) => x.id === p.id) ?? p) : p;
-  const planX = (j: number, f0: number, f: number) => (j >= f0 && j < f ? 'plan' : '');
+  const freshActive = Date.now() < freshUntil && !!freshPrev[p.id];
+  const bp = pending.length && p.id === you && serverState ? (serverState.players.find((x) => x.id === p.id) ?? p) : freshActive ? freshPrev[p.id] : p;
+  const markCls = pending.length && p.id === you ? 'plan' : 'fresh';
+  const planX = (j: number, f0: number, f: number) => (j >= f0 && j < f ? markCls : '');
 
   const chips = s.players
     .map((x) => `<button class="${x.id === p.id ? 'on' : ''}" data-a="view" data-v="${x.id}">${esc(x.name)}${x.id === you ? ' (я)' : ''}</button>`)
@@ -950,18 +1046,18 @@ function renderSheet(): string {
     return `<button class="crop ${planting ? 'pick' : ''} ${chosen ? 'chosen' : ''} ${done ? 'done' : ''} ${planned ? 'planned' : ''}" ${planting ? `data-a="crop" data-v="${id}"` : 'disabled'} ${tipHtml ? `data-tip="${tipHtml}"` : ''}>${inner}</button>`;
   };
   const unit = (i: number) =>
-    `<div class="unit">${cropBtn(`c${i}`, `${plantBox(cornPlant(p.corn[i]), rosette(3))}${cellsRow(CORN_CELLS, p.corn[i], 'h', bp.corn[i])}`, p.corn[i] >= CORN_CELLS, tip('Кукуруза', 'Растёт на этой грядке: 4 ячейки. Каждый собранный урожай кукурузы приносит 3 ПО в конце игры.'), p.corn[i] !== bp.corn[i])}${cropBtn(`b${i}`, `${plantBox(beanPlant(p.beans[i]), rosette(1))}${cellsRow(BEAN_CELLS, p.beans[i], 'h', bp.beans[i])}`, p.beans[i] >= BEAN_CELLS, tip('Фасоль', '2 ячейки. Сажать можно, только если на соседней кукурузе закрашены хотя бы 2 ячейки. Каждый собранный урожай фасоли приносит 1 ПО в конце игры.'), p.beans[i] !== bp.beans[i])}</div>`;
+    `<div class="unit">${cropBtn(`c${i}`, `${plantBox(cornPlant(p.corn[i]), rosette(3))}${cellsRow(CORN_CELLS, p.corn[i], 'h', bp.corn[i])}`, p.corn[i] >= CORN_CELLS, tip('Кукуруза', 'Растёт на этой грядке: 4 ячейки. Каждый собранный урожай кукурузы приносит 3 ПО в конце игры.'), pending.length > 0 && p.corn[i] !== bp.corn[i])}${cropBtn(`b${i}`, `${plantBox(beanPlant(p.beans[i]), rosette(1))}${cellsRow(BEAN_CELLS, p.beans[i], 'h', bp.beans[i])}`, p.beans[i] >= BEAN_CELLS, tip('Фасоль', '2 ячейки. Сажать можно, только если на соседней кукурузе закрашены хотя бы 2 ячейки. Каждый собранный урожай фасоли приносит 1 ПО в конце игры.'), pending.length > 0 && p.beans[i] !== bp.beans[i])}</div>`;
   const pk = (i: number, dir: 'h' | 'v') => {
     const d = PUMPKINS[i];
     const f = p.pumpkins[i];
     const level = f >= d.cells ? 4 : f <= 0 ? 0 : Math.min(3, Math.ceil((3 * f) / d.cells));
     const pic = plantBox(pumpkinPlant(level), goodsBadge(d.goods));
-    return `<div class="pk ${dir}">${cropBtn(`p${i}`, dir === 'h' ? `${pic}${cellsRow(d.cells, f, dir, bp.pumpkins[i])}` : `${cellsRow(d.cells, f, dir, bp.pumpkins[i])}${pic}`, f >= d.cells, tip(`Тыква #${i + 1} (грядка ${d.bed})`, `Собрав тыкву, вы сразу получаете ${d.goods} ${d.goods === 1 ? 'товар' : 'товара'}. Тыквы не приносят ПО. Собрав две соседние тыквы, закрасьте цветок между ними и сделайте действие с этим многолетником.`), f !== bp.pumpkins[i])}</div>`;
+    return `<div class="pk ${dir}">${cropBtn(`p${i}`, dir === 'h' ? `${pic}${cellsRow(d.cells, f, dir, bp.pumpkins[i])}` : `${cellsRow(d.cells, f, dir, bp.pumpkins[i])}${pic}`, f >= d.cells, tip(`Тыква #${i + 1} (грядка ${d.bed})`, `Собрав тыкву, вы сразу получаете ${d.goods} ${d.goods === 1 ? 'товар' : 'товара'}. Тыквы не приносят ПО. Собрав две соседние тыквы, закрасьте цветок между ними и сделайте действие с этим многолетником.`), pending.length > 0 && f !== bp.pumpkins[i])}</div>`;
   };
   /** Цветок между двумя соседними тыквами — с подписью, какой это многолетник. */
   const sy = (i: number) => {
     const name = PERENNIAL_NAMES[PUMPKIN_SYMBOLS[i]];
-    return `<span class="sy ${p.symbols[i] ? 'on' : ''} ${p.symbols[i] && !bp.symbols[i] ? 'planned' : ''}" data-tip="${tip(`Цветок: ${name}`, `Между тыквами #${i + 1} и #${((i + 1) % 12) + 1}. Когда обе собраны, закрасьте этот цветок и выполните действие с многолетником «${name}»: закрасьте следующую ячейку его столбца на клумбе.`)}">${flowerOf(PUMPKIN_SYMBOLS[i], p.symbols[i])}<span class="sn">${name}</span></span>`;
+    return `<span class="sy ${p.symbols[i] ? 'on' : ''} ${pending.length > 0 && p.symbols[i] && !bp.symbols[i] ? 'planned' : ''}" data-tip="${tip(`Цветок: ${name}`, `Между тыквами #${i + 1} и #${((i + 1) % 12) + 1}. Когда обе собраны, закрасьте этот цветок и выполните действие с многолетником «${name}»: закрасьте следующую ячейку его столбца на клумбе.`)}">${flowerOf(PUMPKIN_SYMBOLS[i], p.symbols[i])}<span class="sn">${name}</span></span>`;
   };
   // Кольцо тыкв идёт по контуру огорода, но каждая тыква лежит внутри своей грядки — у её внешнего края.
   // p<N> — тыква, s<N> — цветок между тыквами N и N+1. Порядок — по часовой стрелке.
@@ -1053,7 +1149,7 @@ function renderSheet(): string {
 
   // ---- Шкалы и итог ----
   let g = '';
-  for (let i = 1; i <= GOODS_MAX; i++) g += `<div class="sq ${i % 5 === 0 ? 'star' : ''} ${i <= p.goods ? 'on' : ''} ${i > bp.goods && i <= p.goods ? 'plan' : ''}">${i % 5 === 0 ? '★' : ''}</div>`;
+  for (let i = 1; i <= GOODS_MAX; i++) g += `<div class="sq ${i % 5 === 0 ? 'star' : ''} ${i <= p.goods ? 'on' : ''} ${i > bp.goods && i <= p.goods ? markCls : ''}">${i % 5 === 0 ? '★' : ''}</div>`;
   let c = '';
   for (let i = 1; i <= COMPOST_MAX; i++) c += `<div class="sq cp ${i <= p.compostSpent ? 'spent' : i <= p.compostGained ? 'on' : ''} ${(i > bp.compostSpent && i <= p.compostSpent) || (i > bp.compostGained && i <= p.compostGained) ? 'plan' : ''}"></div>`;
   const scales = `<div class="box goodsbox" data-tip="${tip('Шкала товаров', 'Получая товары, закрашивайте клетки слева направо, сверху вниз. Закрасив клетку со звездой (каждая 5-я), немедленно выполните любое бонусное действие (кроме огорода). От числа товаров зависят бонусы фермерского рынка. Товары никогда не тратятся.')}"><h3 class="bt2">${ic.crate}Товары: ${p.goods}</h3><div class="grid15">${g}</div></div>
@@ -1125,7 +1221,8 @@ function renderDock(): string {
       btns += undo;
     }
   }
-  return `<div class="dock"><div class="dtext">${dieHtml}<span>${esc(text).replace('🌱', ic.seedling).replace('💧', ic.can)}</span></div><div class="dbtns">${btns}</div></div>`;
+  const myTurn = active && !planComplete && !submitting && !over;
+  return `<div class="dock ${myTurn || (o?.kind === 'pick') ? 'myturn' : ''}"><div class="dtext">${dieHtml}<span>${esc(text).replace('🌱', ic.seedling).replace('💧', ic.can)}</span></div><div class="dbtns">${btns}</div></div>`;
 }
 
 // ---------------------------------------------------------------------------

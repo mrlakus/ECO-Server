@@ -729,3 +729,17 @@ main.fit.tall { height: auto; min-height: calc(100dvh - var(--hh)); overflow: vi
 @media (max-width: 760px), (orientation: portrait) {
   #chat { left: 8px; right: 8px; width: auto; bottom: 8px; height: 64dvh; }
 }
+
+/* ---------- 3.8: анимации ---------- */
+.cell.fresh { animation: freshpop .9s ease-out; }
+@keyframes freshpop { 0% { transform: scale(.4); box-shadow: 0 0 0 0 rgba(255, 200, 40, .9); background: #ffe27a; } 45% { transform: scale(1.5); box-shadow: 0 0 0 calc(var(--u, 6px) * .8) rgba(255, 200, 40, .5); } 100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(255, 200, 40, 0); } }
+.sq.fresh { animation: freshpop .9s ease-out; }
+.dice.rolling .die { animation: diceroll .95s cubic-bezier(.2, .8, .3, 1); }
+.dice.rolling .die:nth-child(2n) { animation-duration: 1.05s; animation-direction: reverse; }
+@keyframes diceroll { 0% { transform: translateY(-190%) rotate(-540deg) scale(.7); opacity: 0; } 35% { opacity: 1; } 60% { transform: translateY(8%) rotate(30deg) scale(1.08); } 78% { transform: translateY(-14%) rotate(-12deg); } 100% { transform: none; } }
+.die.lg.rolling, .dtext .die.lg { transform-origin: center; }
+.dock.myturn { animation: dockpulse 1.8s ease-in-out infinite; }
+@keyframes dockpulse { 50% { box-shadow: 0 -4px 12px rgba(0, 0, 0, .25), 0 -8px 22px rgba(224, 169, 29, .75); } }
+.crop.planned { animation: plannedglow 1.4s ease-in-out infinite; }
+@keyframes plannedglow { 50% { box-shadow: 0 0 0 calc(var(--u) * .5) rgba(42, 120, 181, .25); } }
+@media (prefers-reduced-motion: reduce) { .cell.fresh, .sq.fresh, .dice.rolling .die, .dock.myturn, .crop.planned, .floater { animation: none !important; } }
