@@ -273,23 +273,33 @@ let pendingName = '';
 const flowerOf = (c: string, on = true) => `<span class="fl ${on ? '' : 'off'}">${flower(FLOWER_COLORS[c])}</span>`;
 
 /** Масштаб: вся сцена всегда целиком помещается в окно. Есть две раскладки: обычная (180×106) и широкая (232×88) — выбирается та, что даёт крупнее. */
-let wide = false;
-let portrait = false;
+type Mode = 'normal' | 'wide' | 'tall';
+let mode: Mode = 'normal';
 function fit() {
   const cs = getComputedStyle(document.documentElement);
   const hh = parseFloat(cs.getPropertyValue('--hh')) || 46;
   const dh = parseFloat(cs.getPropertyValue('--dh')) || 56;
-  const w = window.innerWidth - 4;
-  const h = window.innerHeight - hh - dh - 4;
-  const uN = Math.min(w / 180, h / 106);
-  const uW = Math.min(w / 232, h / 88);
-  const useWide = uW > uN * 1.03;
-  const u = Math.max(2, Math.min(16, useWide ? uW : uN));
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  // Телефон в вертикальном положении (узкий экран): страница в одну колонку — огород сверху, остальное ниже, прокрутка вниз.
+  const tall = vw < vh * 0.9 || vw < 640;
+  let m: Mode;
+  let u: number;
+  if (tall) {
+    m = 'tall';
+    u = Math.max(3, Math.min(9, (vw - 8) / 62));
+  } else {
+    const w = vw - 4;
+    const h = vh - hh - dh - 4;
+    const uN = Math.min(w / 180, h / 106);
+    const uW = Math.min(w / 232, h / 88);
+    m = uW > uN * 1.03 ? 'wide' : 'normal';
+    u = Math.max(2, Math.min(16, m === 'wide' ? uW : uN));
+  }
   document.documentElement.style.setProperty('--u', `${u.toFixed(3)}px`);
-  const p = window.innerHeight > window.innerWidth * 1.1;
-  if (p !== portrait || useWide !== wide) {
-    portrait = p;
-    wide = useWide;
+  document.documentElement.classList.toggle('tallmode', m === 'tall');
+  if (m !== mode) {
+    mode = m;
     if (state) render();
   }
 }
@@ -308,7 +318,10 @@ function render() {
   if (!room) app.innerHTML = renderLobby();
   else if (!state) app.innerHTML = renderRoom();
   else app.innerHTML = renderGame();
-  window.scrollTo(0, scrollY);
+  if (pendingScroll) {
+    document.getElementById(pendingScroll)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    pendingScroll = null;
+  } else window.scrollTo(0, scrollY);
 }
 
 const windowWrap = (inner: string) => `<div class="window"><div class="shutter"></div><div class="cork">${inner}</div><div class="shutter r"></div></div>`;
@@ -382,8 +395,7 @@ function renderGame(): string {
       <button data-a="tab" data-v="sheet" class="${tab === 'sheet' ? 'on' : ''}">Планшет</button>
     </nav>
   </header>
-  ${portrait ? '<div class="rotate-hint">↻ Поверните устройство горизонтально — так планшет виден крупнее</div>' : ''}
-  <main class="fit"><div class="stage ${wide ? 'wide' : ''}">${tab === 'board' ? renderBoard() : renderSheet()}</div></main>
+  <main class="fit ${mode === 'tall' ? 'tall' : ''}"><div class="stage ${mode === 'wide' ? 'wide' : mode === 'tall' ? 'tall' : ''}">${tab === 'board' ? renderBoard() : renderSheet()}</div></main>
   ${renderDock()}
   ${over && showResults ? `<div class="overlay">${renderResults()}</div>` : ''}
   ${renderVote()}`;
