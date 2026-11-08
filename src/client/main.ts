@@ -34,6 +34,7 @@ import type { Action, GameState, Options, PlayerState, Target } from '../shared/
 import { FLOWER_COLORS, flower, goodsBadge, ic, rosette } from './icons';
 import { VERSION } from '../shared/version';
 import { BARN_PICS, beanPlant, cornPlant, pumpkinPlant } from './plants';
+import { SCENES } from './scenes';
 
 // ---------------------------------------------------------------------------
 // Состояние клиента
@@ -334,6 +335,20 @@ const NOTE: Record<string, { kind: string; pin: string; icons: string }> = {
 const EVENT_ICON = { barn: ic.barn, rain: ic.can, market: ic.crate };
 const EVENT_LABEL = { barn: 'Сарай', rain: 'Дождь', market: 'Рынок' };
 
+/** Что делает клетка рондели — короткое пояснение со значками (по правилам игры). */
+function noteText(id: string): string {
+  const t: Record<string, string> = {
+    plantWater: `${fx('plant')} посадка или ${fx('water')} полив на грядке по значению кубика`,
+    barn: `${fx('star:barn')} закрасьте клетку любого предмета в сарае`,
+    barn2: `${fx('star:barn')} закрасьте клетку любого предмета в сарае`,
+    compostGoods: `${fx('compost:1')} 1 компост и ${fx('goods:4')} 4 товара`,
+    apiaryGarden: `${fx('star:apiary')} пасека или ${fx('star:garden')} сад: закрасьте клетку`,
+    apiaryGardenGold: `${fx('star:apiary')} пасека или ${fx('star:garden')} сад: закрасьте клетку`,
+    market: `${whiteFlower} бонусы по числу ваших товаров`,
+  };
+  return t[id] ?? '';
+}
+
 function renderBoard(): string {
   const s = state!;
   const picking = options?.kind === 'pick';
@@ -350,7 +365,9 @@ function renderBoard(): string {
     const can = picking && options!.pickCells!.includes(i);
     const nt = NOTE[f.id];
     return `<button class="note ${nt.kind} pin-${nt.pin} ${can ? 'pick' : ''}" data-a="pick" data-v="${i}" ${can ? '' : 'disabled'}>
-      <span class="n">${i + 1}</span><span class="nicons">${nt.icons}</span><span class="name">${esc(f.name)}</span>
+      <span class="n">${i + 1}</span><span class="name">${esc(f.name)}</span>
+      <span class="scene-wrap">${SCENES[f.id] ?? ''}</span>
+      <span class="ntx">${noteText(f.id)}</span>
       <span class="dice">${dice.map((v) => die(v)).join('')}${Array.from({ length: ghosts }, () => die(ghostVal, 'ghost')).join('')}</span>
       ${s.edith === i ? `<span class="edith" title="Фишка Эдит">${ic.edith}</span>` : ''}
     </button>`;

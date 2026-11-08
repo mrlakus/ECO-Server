@@ -576,3 +576,26 @@ body {
 .item .btx { line-height: 1.08; margin-top: .15em; }
 .stage.wide .item .btx { font-size: calc(var(--u) * 1.2); }
 .stage.wide .item .nm { font-size: calc(var(--u) * 1.55); }
+
+/* ---------- 2.9: клетки рондели с иллюстрациями, журнал крупнее, заметное выделение выбранных растений ---------- */
+.note { padding: 2.6em .7em .6em; gap: .3em; }
+.note .name { font-size: calc(var(--u) * 2.1); }
+.note .scene-wrap { flex: 1; min-height: 0; width: 100%; display: flex; align-items: center; justify-content: center; }
+.note .scene { width: 100%; height: 100%; max-height: 100%; border-radius: .8em; box-shadow: 0 .15em .4em rgba(0, 0, 0, .25); background: #e9f3dc; }
+.note .ntx { font-family: var(--body); font-size: calc(var(--u) * 1.4); line-height: 1.12; color: #4a4333; text-align: center; }
+.note .ntx .fx { margin: 0 calc(var(--u) * .1); }
+.note .dice { margin-top: .2em; min-height: 6.4em; }
+.log { font-size: calc(var(--u) * 1.95); }
+.log li { white-space: normal; line-height: 1.12; }
+.log li.sep { font-size: calc(var(--u) * 2.3); }
+.crop { position: relative; }
+.crop.chosen {
+  background: #d9f6b2 !important; border-color: #2f8a2f !important; transform: scale(1.05);
+  box-shadow: 0 0 0 calc(var(--u) * .35) rgba(79, 190, 60, .6), 0 0 calc(var(--u) * 1.6) calc(var(--u) * .3) rgba(120, 230, 80, .7);
+  animation: chosenglow 1.1s ease-in-out infinite;
+}
+.crop.chosen::after {
+  content: "✓"; position: absolute; top: calc(var(--u) * -.7); right: calc(var(--u) * -.6); width: calc(var(--u) * 2); height: calc(var(--u) * 2); border-radius: 50%;
+  background: #2f8a2f; color: #fff; font-size: calc(var(--u) * 1.4); line-height: 1; display: flex; align-items: center; justify-content: center; font-weight: 800; box-shadow: 0 .15em .3em rgba(0, 0, 0, .35);
+}
+@keyframes chosenglow { 50% { box-shadow: 0 0 0 calc(var(--u) * .5) rgba(79, 190, 60, .45), 0 0 calc(var(--u) * 2.2) calc(var(--u) * .5) rgba(120, 230, 80, .8); } }
