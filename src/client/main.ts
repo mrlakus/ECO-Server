@@ -36,7 +36,7 @@ import { VERSION } from '../shared/version';
 import { BARN_PICS, beanPlant, cornPlant, pumpkinPlant } from './plants';
 import { SCENES } from './scenes';
 import { music } from './music';
-import { browserNotifySupported, chime, enableBrowserNotifications, notifyTurn, prefs, savePrefs } from './notify';
+import { browserNotifySupported, chime, enableBrowserNotifications, notifyChat, notifyTurn, prefs, savePrefs } from './notify';
 
 // ---------------------------------------------------------------------------
 // Состояние клиента
@@ -81,6 +81,12 @@ interface RoomItem { code: string; host: string; players: number; max: number; s
 let roomList: RoomItem[] = [];
 let myRoomPassword = ''; // пароль, который хозяин задал при создании (показываем ему, чтобы мог сообщить друзьям)
 let pendingPwRoom = ''; // комната, в которую вводим пароль
+interface ChatMsg { id: number; from: string; name: string; text: string; kind: 'text' | 'react'; at: number }
+let chatMsgs: ChatMsg[] = [];
+let chatOpen = false;
+let chatUnread = 0;
+const REACTS = ['👍', '😄', '😮', '😢', '👏', '🔥', '🤔', '⏳'];
+const PHRASES = ['Ваш ход!', 'Подождите минуту', 'Хороший ход!', 'Ой, не туда нажал(а)', 'Спасибо за игру!'];
 let wasActionable = false; // у вас было доступное действие в прошлом обновлении (чтобы уведомлять только о новом ходе)
 let firstUpdate = true; // первое обновление после (пере)подключения — не уведомляем
 
@@ -200,6 +206,23 @@ function act(action: Action) {
 
 function onMessage(m: any) {
   switch (m.type) {
+    case 'chatlog':
+      chatMsgs = m.msgs ?? [];
+      chatUnread = 0;
+      refreshChat();
+      return;
+    case 'chat': {
+      const msg = m.msg as ChatMsg;
+      chatMsgs.push(msg);
+      if (chatMsgs.length > 100) chatMsgs.shift();
+      if (msg.kind === 'react') showFloater(msg);
+      else if (msg.from !== you) {
+        if (!chatOpen) chatUnread++;
+        if (!chatOpen || document.hidden) notifyChat(msg.name, msg.text);
+      }
+      refreshChat();
+      return;
+    }
     case 'rooms': {
       roomList = m.rooms ?? [];
       const el = document.getElementById('roomlist');
@@ -237,6 +260,9 @@ function onMessage(m: any) {
       break;
     }
     case 'ended':
+      chatMsgs = [];
+      chatOpen = false;
+      chatUnread = 0;
       saveSession(null);
       room = null;
       serverState = null;
@@ -249,6 +275,9 @@ function onMessage(m: any) {
       send({ type: 'listrooms' });
       break;
     case 'left':
+      chatMsgs = [];
+      chatOpen = false;
+      chatUnread = 0;
       saveSession(null);
       room = null;
       serverState = null;
@@ -350,6 +379,98 @@ function joinRoom(code: string, locked: boolean, password = '') {
   if (locked && !password) return openPasswordModal(code);
   send({ type: 'join', code, name, password });
 }
+// ---------------------------------------------------------------------------
+// Чат и реакции (панель живёт вне #app, поэтому не пропадает при перерисовке)
+// ---------------------------------------------------------------------------
+const hhmm = (t: number) => new Date(t).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+function chatHtmlList(): string {
+  if (!chatMsgs.length) return '<p class="legend" style="text-align:center;margin:12px 0">Пока пусто. Напишите что-нибудь или отправьте реакцию!</p>';
+  return chatMsgs
+    .map((m) => {
+      const mine = m.from === you;
+      return m.kind === 'react'
+        ? `<div class="cm react ${mine ? 'mine' : ''}"><span class="cmn">${esc(m.name)}</span> ${esc(m.text)}</div>`
+        : `<div class="cm ${mine ? 'mine' : ''}"><span class="cmn">${mine ? 'Вы' : esc(m.name)} <i>${hhmm(m.at)}</i></span><span class="cmt">${esc(m.text)}</span></div>`;
+    })
+    .join('');
+}
+function refreshChat() {
+  updateChatFab();
+  const list = document.getElementById('chatlist');
+  if (list) {
+    const atBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 60;
+    list.innerHTML = chatHtmlList();
+    if (atBottom) list.scrollTop = list.scrollHeight;
+  }
+}
+function updateChatFab() {
+  const fab = document.getElementById('chatfab');
+  if (!fab) return;
+  fab.hidden = !room;
+  const badge = fab.querySelector('.badge') as HTMLElement | null;
+  if (badge) {
+    badge.textContent = chatUnread > 9 ? '9+' : String(chatUnread);
+    badge.hidden = chatUnread === 0 || chatOpen;
+  }
+  const dock = document.querySelector<HTMLElement>('.dock');
+  fab.style.bottom = `${(dock ? dock.offsetHeight : 0) + 14}px`;
+  const panel = document.getElementById('chat');
+  if (panel && !panel.hidden && dock) panel.style.setProperty('--dockh', `${dock.offsetHeight}px`);
+}
+function openChat() {
+  chatOpen = true;
+  chatUnread = 0;
+  const panel = document.getElementById('chat')!;
+  panel.hidden = false;
+  panel.innerHTML = `<div class="chead"><b>💬 Чат комнаты</b><button class="cx" data-chat="close" aria-label="Закрыть">✕</button></div>
+    <div id="chatlist" class="clist">${chatHtmlList()}</div>
+    <div class="cquick">${REACTS.map((e) => `<button data-react="${e}" title="Реакция">${e}</button>`).join('')}</div>
+    <div class="cquick phr">${PHRASES.map((t) => `<button data-phrase="${esc(t)}">${esc(t)}</button>`).join('')}</div>
+    <form id="chatform" class="cform"><input id="chatinput" type="text" maxlength="200" placeholder="Сообщение…" autocomplete="off"><button class="btn" type="submit">➤</button></form>`;
+  const list = document.getElementById('chatlist')!;
+  list.scrollTop = list.scrollHeight;
+  updateChatFab();
+  if (!window.matchMedia('(hover: none)').matches) (document.getElementById('chatinput') as HTMLInputElement).focus();
+}
+function closeChat() {
+  chatOpen = false;
+  const panel = document.getElementById('chat')!;
+  panel.hidden = true;
+  panel.innerHTML = '';
+  updateChatFab();
+}
+function showFloater(msg: ChatMsg) {
+  const box = document.getElementById('floaters');
+  if (!box) return;
+  const el = document.createElement('div');
+  el.className = 'floater';
+  el.style.left = `${15 + Math.random() * 70}%`;
+  el.innerHTML = `<span class="fe">${esc(msg.text)}</span><span class="fn">${esc(msg.name)}</span>`;
+  box.appendChild(el);
+  setTimeout(() => el.remove(), 3200);
+}
+function sendChat(text: string) {
+  const t = text.trim();
+  if (t) send({ type: 'chat', text: t });
+}
+document.addEventListener('click', (e) => {
+  const t = e.target as HTMLElement;
+  if (t.closest('#chatfab')) return chatOpen ? closeChat() : openChat();
+  if (t.closest('[data-chat="close"]')) return closeChat();
+  const re = t.closest<HTMLElement>('[data-react]');
+  if (re) return send({ type: 'react', emoji: re.dataset.react });
+  const ph = t.closest<HTMLElement>('[data-phrase]');
+  if (ph) return sendChat(ph.dataset.phrase ?? '');
+});
+document.addEventListener('submit', (e) => {
+  if ((e.target as HTMLElement).id !== 'chatform') return;
+  e.preventDefault();
+  const inp = document.getElementById('chatinput') as HTMLInputElement;
+  sendChat(inp.value);
+  inp.value = '';
+});
+window.addEventListener('resize', updateChatFab);
+
 const modalEl = () => document.getElementById('modal')!;
 function openSettings() {
   const row = (id: string, label: string, checked: boolean, disabled = false, hint = '') =>
@@ -422,6 +543,7 @@ function render() {
   else if (!state) app.innerHTML = renderRoom();
   else app.innerHTML = renderGame();
   music.setMenuVisible(!state);
+  updateChatFab();
   if (pendingScroll) {
     document.getElementById(pendingScroll)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
     pendingScroll = null;

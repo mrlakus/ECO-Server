@@ -23,6 +23,7 @@ interface Member {
   name: string;
   socket: WebSocket | null;
   bot?: boolean;
+  chatTimes?: number[];
 }
 interface Room {
   code: string;
@@ -37,7 +38,24 @@ interface Room {
   overLogged?: boolean;
   pw?: { salt: string; hash: string }; // пароль комнаты (хранится только хеш)
   pwFails: number[]; // времена неудачных попыток ввода пароля
+  chat: ChatMsg[];
+  chatSeq: number;
 }
+interface ChatMsg {
+  id: number;
+  from: string;
+  name: string;
+  text: string;
+  kind: 'text' | 'react';
+  at: number;
+}
+const REACTIONS = ['👍', '😄', '😮', '😢', '👏', '🔥', '🤔', '⏳'];
+const cleanChat = (v: unknown) =>
+  String(v ?? '')
+    .replace(/[\u0000-\u001f\u007f<>]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 200);
 const rooms = new Map<string, Room>();
 
 // ---------- Пароль комнаты ----------
@@ -237,6 +255,7 @@ function attach(ws: WebSocket, conn: Conn, room: Room, member: Member) {
   conn.room = room;
   conn.member = member;
   send(ws, { type: 'joined', code: room.code, you: member.id, token: member.token });
+  send(ws, { type: 'chatlog', msgs: room.chat.slice(-60) });
   broadcast(room);
 }
 
@@ -256,7 +275,7 @@ function handle(ws: WebSocket, conn: Conn, raw: string) {
       const name = cleanName(msg.name);
       if (!name) return err('Введите имя');
       const member: Member = { id: newId(), token: randomBytes(16).toString('hex'), name, socket: null };
-      const room: Room = { code: newCode(), hostId: member.id, members: [member], game: null, touched: Date.now(), lastDecline: {}, pwFails: [] };
+      const room: Room = { code: newCode(), hostId: member.id, members: [member], game: null, touched: Date.now(), lastDecline: {}, pwFails: [], chat: [], chatSeq: 0 };
       const password = typeof msg.password === 'string' ? msg.password.trim().slice(0, 32) : '';
       if (password) room.pw = hashPw(password);
       rooms.set(room.code, room);
@@ -434,6 +453,30 @@ function handle(ws: WebSocket, conn: Conn, raw: string) {
       conn.room = null;
       conn.member = null;
       send(ws, { type: 'left' });
+      return;
+    }
+    case 'chat':
+    case 'react': {
+      const { room, member } = conn;
+      if (!room || !member) return err('Вы не в комнате');
+      const now = Date.now();
+      member.chatTimes = (member.chatTimes ?? []).filter((t) => now - t < 20_000);
+      if (member.chatTimes.length >= 12 || (member.chatTimes.at(-1) ?? 0) > now - 400) return err('Слишком часто — подождите секунду');
+      let text: string;
+      let kind: 'text' | 'react' = 'text';
+      if (msg.type === 'react') {
+        if (!REACTIONS.includes(msg.emoji)) return;
+        text = msg.emoji;
+        kind = 'react';
+      } else {
+        text = cleanChat(msg.text);
+        if (!text) return;
+      }
+      member.chatTimes.push(now);
+      const m: ChatMsg = { id: ++room.chatSeq, from: member.id, name: member.name, text, kind, at: now };
+      room.chat.push(m);
+      if (room.chat.length > 100) room.chat.splice(0, room.chat.length - 100);
+      for (const mm of room.members) send(mm.socket, { type: 'chat', msg: m });
       return;
     }
     case 'listrooms':

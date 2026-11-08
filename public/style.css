@@ -697,3 +697,35 @@ main.fit.tall { height: auto; min-height: calc(100dvh - var(--hh)); overflow: vi
 .setrow input { width: 22px; height: 22px; margin-top: 2px; flex: none; accent-color: var(--green); }
 .setrow small { display: block; color: var(--muted); font-size: .8rem; line-height: 1.15; }
 .setrow.off { opacity: .55; }
+
+/* ---------- 3.6: чат и реакции ---------- */
+#chatfab { position: fixed; right: 14px; bottom: 14px; z-index: 45; width: 54px; height: 54px; border-radius: 50%; border: 3px solid #fff; background: var(--green); color: #fff; font-size: 1.5rem; line-height: 1; box-shadow: 0 4px 12px rgba(0, 0, 0, .35); }
+#chatfab[hidden] { display: none; }
+#chatfab .badge { position: absolute; top: -6px; right: -6px; min-width: 22px; height: 22px; padding: 0 5px; border-radius: 11px; background: #d9382a; color: #fff; font-size: .78rem; font-weight: 800; display: flex; align-items: center; justify-content: center; margin: 0; }
+#chatfab .badge[hidden] { display: none; }
+#chat { position: fixed; right: 12px; bottom: calc(var(--dockh, 60px) + 76px); width: min(360px, calc(100vw - 24px)); height: min(62dvh, 470px); z-index: 60; display: flex; flex-direction: column; background: var(--paper); border: 3px solid var(--wood-d); border-radius: 14px; box-shadow: 0 10px 30px rgba(0, 0, 0, .4); overflow: hidden; }
+#chat[hidden] { display: none; }
+.chead { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; background: linear-gradient(#b17a46, #8f5d31); color: #fff3d6; font-family: var(--script); font-size: 1.25rem; }
+.chead .cx { background: none; border: 0; color: #fff3d6; font-size: 1.2rem; padding: 2px 8px; }
+.clist { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; }
+.cm { align-self: flex-start; max-width: 86%; background: #fffdf5; border: 2px solid #d9c9a0; border-radius: 12px 12px 12px 3px; padding: 5px 10px; }
+.cm.mine { align-self: flex-end; background: #dff1c6; border-color: #a9cf84; border-radius: 12px 12px 3px 12px; }
+.cm .cmn { display: block; font-size: .78rem; color: var(--muted); font-weight: 700; }
+.cm .cmn i { font-weight: 400; margin-left: 4px; }
+.cm .cmt { display: block; font-size: 1rem; line-height: 1.2; word-break: break-word; }
+.cm.react { background: none; border: 0; align-self: center; font-size: 1.3rem; padding: 0; }
+.cm.react .cmn { display: inline; font-size: .82rem; margin-right: 4px; }
+.cquick { display: flex; gap: 4px; flex-wrap: wrap; padding: 4px 8px 0; }
+.cquick button { border: 2px solid #d9c9a0; background: #fffdf5; border-radius: 16px; font-size: 1.15rem; padding: 2px 8px; min-height: 34px; }
+.cquick.phr button { font-size: .82rem; padding: 2px 10px; }
+.cform { display: flex; gap: 6px; padding: 8px; }
+.cform input { flex: 1; min-width: 0; padding: 8px 12px; font-size: 1rem; }
+.cform .btn { min-height: 40px; padding: 0 16px; }
+#floaters { position: fixed; inset: 0; pointer-events: none; z-index: 80; overflow: hidden; }
+.floater { position: absolute; bottom: 16%; display: flex; flex-direction: column; align-items: center; animation: floatup 3s ease-out forwards; }
+.floater .fe { font-size: 3.4rem; filter: drop-shadow(0 4px 6px rgba(0, 0, 0, .35)); }
+.floater .fn { font-size: .85rem; font-weight: 700; background: rgba(255, 250, 235, .92); border: 2px solid #a8713f; border-radius: 10px; padding: 0 8px; }
+@keyframes floatup { 0% { transform: translateY(20px) scale(.6); opacity: 0; } 12% { opacity: 1; transform: translateY(0) scale(1.1); } 100% { transform: translateY(-46vh) scale(1); opacity: 0; } }
+@media (max-width: 760px), (orientation: portrait) {
+  #chat { left: 8px; right: 8px; width: auto; bottom: 8px; height: 64dvh; }
+}
