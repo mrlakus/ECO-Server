@@ -45,6 +45,7 @@ interface RoomInfo {
   code: string;
   hostId: string;
   started: boolean;
+  locked?: boolean;
   vote?: { by: string; byName: string; waiting: string[] } | null;
   members: { id: string; name: string; connected: boolean; bot?: boolean }[];
 }
@@ -75,6 +76,10 @@ let pendingScroll: string | null = null;
 let lastOptionsKey = '';
 let retry = 0;
 let showResults = true;
+interface RoomItem { code: string; host: string; players: number; max: number; started: boolean; locked: boolean; bots: number }
+let roomList: RoomItem[] = [];
+let myRoomPassword = ''; // пароль, который хозяин задал при создании (показываем ему, чтобы мог сообщить друзьям)
+let pendingPwRoom = ''; // комната, в которую вводим пароль
 
 const app = document.getElementById('app')!;
 
@@ -191,7 +196,14 @@ function act(action: Action) {
 
 function onMessage(m: any) {
   switch (m.type) {
+    case 'rooms': {
+      roomList = m.rooms ?? [];
+      const el = document.getElementById('roomlist');
+      if (el) el.innerHTML = renderRoomList(); // обновляем только список — поля ввода не сбрасываются
+      return;
+    }
     case 'joined':
+      closeModal();
       saveSession({ code: m.code, token: m.token, name: session?.name ?? pendingName });
       you = m.you;
       history.replaceState(null, '', `?room=${m.code}`);
@@ -224,6 +236,7 @@ function onMessage(m: any) {
       selection = null;
       history.replaceState(null, '', location.pathname);
       toast(m.message);
+      send({ type: 'listrooms' });
       break;
     case 'left':
       saveSession(null);
@@ -233,8 +246,13 @@ function onMessage(m: any) {
       pending = [];
       recompute();
       history.replaceState(null, '', location.pathname);
+      send({ type: 'listrooms' });
       break;
     case 'error':
+      if (m.code === 'password_required' || m.code === 'wrong_password') {
+        openPasswordModal(m.room, m.code === 'wrong_password' ? m.message : '');
+        return;
+      }
       toast(m.message);
       if (submitting) {
         submitting = false;
@@ -313,6 +331,44 @@ fit();
 // Экраны
 // ---------------------------------------------------------------------------
 
+function joinRoom(code: string, locked: boolean, password = '') {
+  const name = (document.getElementById('name') as HTMLInputElement | null)?.value.trim() || session?.name || localStorage.getItem('ts-name') || '';
+  if (!name) return toast('Введите имя (в поле «Ваше имя»)');
+  localStorage.setItem('ts-name', name);
+  pendingName = name;
+  session = { code: '', token: '', name };
+  if (locked && !password) return openPasswordModal(code);
+  send({ type: 'join', code, name, password });
+}
+const modalEl = () => document.getElementById('modal')!;
+function closeModal() {
+  modalEl().innerHTML = '';
+  pendingPwRoom = '';
+}
+function openPasswordModal(code: string, message = '') {
+  pendingPwRoom = code;
+  modalEl().innerHTML = `<div class="overlay vote"><div class="paper results-card"><h3 class="script">🔒 Комната ${esc(code)} защищена паролем</h3>
+    ${message ? `<p class="legend" style="color:#b3321f;font-size:1rem;margin:0 0 8px"><b>${esc(message)}</b></p>` : ''}
+    <input type="text" id="modalpw" maxlength="32" placeholder="Введите пароль" autocomplete="off" style="margin-bottom:10px">
+    <div class="row"><button class="btn" data-a="pwok">Войти</button><button class="btn sec" data-a="pwcancel">Отмена</button></div></div></div>`;
+  (document.getElementById('modalpw') as HTMLInputElement | null)?.focus();
+}
+document.addEventListener('click', (e) => {
+  const el = (e.target as HTMLElement).closest<HTMLElement>('#modal [data-a]');
+  if (!el) return;
+  if (el.dataset.a === 'pwcancel') closeModal();
+  if (el.dataset.a === 'pwok') {
+    const pw = (document.getElementById('modalpw') as HTMLInputElement).value.trim();
+    if (!pw) return toast('Введите пароль');
+    const code = pendingPwRoom;
+    joinRoom(code, true, pw);
+  }
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && (e.target as HTMLElement).id === 'modalpw') (document.querySelector('#modal [data-a="pwok"]') as HTMLElement | null)?.click();
+  if (e.key === 'Escape' && pendingPwRoom) closeModal();
+});
+
 /** Кнопка включения музыки и ползунок громкости (показываются в меню). */
 function musicWidget(): string {
   return `<div class="music"><button class="mbtn" data-a="music" aria-pressed="${music.on}" title="${music.on ? 'Выключить музыку' : 'Включить музыку'}">${music.on ? '🎵' : '🔇'}</button>
@@ -347,13 +403,28 @@ function renderLobby(): string {
     <div class="paper"><h3 class="script">Ваше имя</h3>
       <input type="text" id="name" maxlength="20" placeholder="Например, Алексей" value="${esc(saved)}" autocomplete="nickname"></div>
     <div class="paper"><h3 class="script">Новая комната</h3>
+      <input type="text" id="roompw" maxlength="32" placeholder="Пароль комнаты (необязательно)" autocomplete="off" style="margin-bottom:8px">
       <button class="btn block" data-a="create">Создать комнату</button></div>
     <div class="paper"><h3 class="script">Подключиться к другу</h3>
       <div class="row">
         <input type="text" id="code" maxlength="5" placeholder="Код комнаты" value="${esc(code)}" autocapitalize="characters" autocomplete="off" style="text-transform:uppercase">
         <button class="btn" data-a="join" style="flex:none">Войти</button>
-      </div></div>`)}
+      </div>
+      <input type="text" id="joinpw" maxlength="32" placeholder="Пароль (если у комнаты есть)" autocomplete="off" style="margin-top:8px"></div>
+    <div class="paper"><h3 class="script">Открытые комнаты <button class="btn sec mini" data-a="listrooms" title="Обновить список">↻</button></h3>
+      <div id="roomlist">${renderRoomList()}</div></div>`)}
   </div>`;
+}
+
+function renderRoomList(): string {
+  if (!roomList.length) return '<p class="legend" style="margin:0">Пока нет открытых комнат. Создайте свою!</p>';
+  return roomList
+    .map(
+      (r) => `<div class="rm ${r.started ? 'busy' : ''}"><div class="rmi"><b>${r.locked ? '🔒 ' : ''}Комната ${esc(r.host)}</b>
+      <small>${r.players}/${r.max}${r.bots ? ` · ботов: ${r.bots}` : ''} · ${r.started ? 'идёт игра' : 'ждут игроков'} · код ${esc(r.code)}</small></div>
+      <button class="btn" data-a="joinroom" data-code="${esc(r.code)}" data-locked="${r.locked}" ${r.started || r.players >= r.max ? 'disabled' : ''}>Войти</button></div>`,
+    )
+    .join('');
 }
 
 function renderRoom(): string {
@@ -366,6 +437,7 @@ function renderRoom(): string {
     <div class="logo"><div class="logo-ic">${ic.pumpkin}${ic.corn}${ic.bean}</div><h1>Комната</h1><p>Отправьте код или ссылку друзьям</p></div>
     ${windowWrap(`
     <div class="paper"><div class="code">${r.code}</div>
+      ${r.locked ? `<p class="legend" style="text-align:center;margin:0 0 8px">🔒 Комната с паролем${isHost && myRoomPassword ? `: <b>${esc(myRoomPassword)}</b>` : ''}</p>` : ''}
       <div class="row"><button class="btn sec" data-a="copy" data-v="${esc(link)}">Скопировать ссылку</button>
       ${typeof navigator.share === 'function' ? `<button class="btn sec" data-a="share" data-v="${esc(link)}">Поделиться</button>` : ''}</div></div>
     <div class="paper"><h3 class="script">Игроки (${r.members.length}/${MAX_PLAYERS})</h3>
@@ -910,13 +982,22 @@ app.addEventListener('click', (ev) => {
       localStorage.setItem('ts-name', name);
       pendingName = name;
       session = { code: '', token: '', name };
-      if (a === 'create') send({ type: 'create', name });
-      else {
+      if (a === 'create') {
+        const password = (document.getElementById('roompw') as HTMLInputElement | null)?.value.trim() ?? '';
+        myRoomPassword = password;
+        send({ type: 'create', name, password });
+      } else {
         const code = (document.getElementById('code') as HTMLInputElement).value.trim().toUpperCase();
         if (code.length < 4) return toast('Введите код комнаты');
-        send({ type: 'join', code, name });
+        const password = (document.getElementById('joinpw') as HTMLInputElement | null)?.value.trim() ?? '';
+        send({ type: 'join', code, name, password });
       }
       return;
+    }
+    case 'listrooms':
+      return send({ type: 'listrooms' });
+    case 'joinroom': {
+      return joinRoom(el.dataset.code!, el.dataset.locked === 'true');
     }
     case 'start':
       return send({ type: 'start' });

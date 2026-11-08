@@ -1,7 +1,7 @@
 import http from 'node:http';
 import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
-import { randomBytes, randomInt } from 'node:crypto';
+import { randomBytes, randomInt, scryptSync, timingSafeEqual } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer, type WebSocket } from 'ws';
@@ -35,14 +35,29 @@ interface Room {
   lastDecline: Record<string, number>;
   closed?: boolean;
   overLogged?: boolean;
+  pw?: { salt: string; hash: string }; // пароль комнаты (хранится только хеш)
+  pwFails: number[]; // времена неудачных попыток ввода пароля
 }
 const rooms = new Map<string, Room>();
+
+// ---------- Пароль комнаты ----------
+const hashPw = (pw: string) => {
+  const salt = randomBytes(16).toString('hex');
+  return { salt, hash: scryptSync(pw, salt, 32).toString('hex') };
+};
+const checkPw = (room: Room, pw: string) => {
+  if (!room.pw) return true;
+  const h = scryptSync(pw, room.pw.salt, 32);
+  const want = Buffer.from(room.pw.hash, 'hex');
+  return h.length === want.length && timingSafeEqual(h, want);
+};
 
 // ---------- Журнал сервера (виден в Render → Logs) ----------
 const stamp = () => new Date().toISOString().replace('T', ' ').slice(0, 19);
 export const slog = (msg: string) => console.log(`[${stamp()}] ${msg}`);
 function deleteRoom(room: Room, why: string) {
   if (!rooms.delete(room.code)) return;
+  scheduleRoomList();
   slog(`комната ${room.code} закрыта: ${why}`);
 }
 
@@ -70,12 +85,55 @@ function publicRoom(room: Room) {
     code: room.code,
     hostId: room.hostId,
     started: !!room.game,
+    locked: !!room.pw,
     vote: room.vote ? { by: room.vote.by, byName: nameOf(room, room.vote.by), waiting: waitingIds(room) } : null,
     members: room.members.map((m) => ({ id: m.id, name: m.name, connected: !!m.bot || !!m.socket, bot: !!m.bot })),
   };
 }
 
+// ---------- Список открытых комнат ----------
+interface RoomItem {
+  code: string;
+  host: string;
+  players: number;
+  max: number;
+  started: boolean;
+  locked: boolean;
+  bots: number;
+}
+function roomList(): RoomItem[] {
+  const items: (RoomItem & { at: number })[] = [];
+  for (const r of rooms.values()) {
+    if (r.closed || !r.members.some((m) => !m.bot && m.socket)) continue; // комнаты без людей онлайн не показываем
+    items.push({
+      code: r.code,
+      host: r.members.find((m) => m.id === r.hostId)?.name ?? '?',
+      players: r.members.length,
+      max: MAX_PLAYERS,
+      started: !!r.game,
+      locked: !!r.pw,
+      bots: r.members.filter((m) => m.bot).length,
+      at: r.touched,
+    });
+  }
+  items.sort((a, b) => Number(a.started) - Number(b.started) || b.at - a.at);
+  return items.slice(0, 50).map(({ at: _at, ...rest }) => rest);
+}
+const connections = new Map<WebSocket, Conn>();
+let listTimer: NodeJS.Timeout | undefined;
+/** Отправляет актуальный список комнат тем, кто сейчас в меню (не в комнате). Не чаще 4 раз в секунду. */
+function scheduleRoomList() {
+  if (listTimer) return;
+  listTimer = setTimeout(() => {
+    listTimer = undefined;
+    const msg = { type: 'rooms', rooms: roomList() };
+    for (const [ws, c] of connections) if (!c.room || c.room.closed) send(ws, msg);
+  }, 250);
+  listTimer.unref();
+}
+
 function broadcast(room: Room) {
+  scheduleRoomList();
   room.touched = Date.now();
   if (room.game?.phase === 'over' && !room.overLogged) {
     room.overLogged = true;
@@ -198,9 +256,11 @@ function handle(ws: WebSocket, conn: Conn, raw: string) {
       const name = cleanName(msg.name);
       if (!name) return err('Введите имя');
       const member: Member = { id: newId(), token: randomBytes(16).toString('hex'), name, socket: null };
-      const room: Room = { code: newCode(), hostId: member.id, members: [member], game: null, touched: Date.now(), lastDecline: {} };
+      const room: Room = { code: newCode(), hostId: member.id, members: [member], game: null, touched: Date.now(), lastDecline: {}, pwFails: [] };
+      const password = typeof msg.password === 'string' ? msg.password.trim().slice(0, 32) : '';
+      if (password) room.pw = hashPw(password);
       rooms.set(room.code, room);
-      slog(`комната ${room.code} создана: хозяин «${name}»`);
+      slog(`комната ${room.code} создана: хозяин «${name}»${room.pw ? ', с паролем' : ''}`);
       attach(ws, conn, room, member);
       return;
     }
@@ -215,6 +275,18 @@ function handle(ws: WebSocket, conn: Conn, raw: string) {
       }
       if (room.game) return err('Игра уже началась');
       if (room.members.length >= MAX_PLAYERS) return err('Комната заполнена');
+      if (room.pw) {
+        const given = typeof msg.password === 'string' ? msg.password : '';
+        if (!given) return send(ws, { type: 'error', code: 'password_required', room: room.code, message: 'Комната защищена паролем' });
+        const now = Date.now();
+        room.pwFails = room.pwFails.filter((t) => now - t < 60_000);
+        if (room.pwFails.length >= 6) return err('Слишком много неверных попыток. Подождите минуту');
+        if (!checkPw(room, given.slice(0, 64))) {
+          room.pwFails.push(now);
+          slog(`комната ${room.code}: неверный пароль (попытка ${room.pwFails.length})`);
+          return send(ws, { type: 'error', code: 'wrong_password', room: room.code, message: 'Неверный пароль' });
+        }
+      }
       const name = cleanName(msg.name);
       if (!name) return err('Введите имя');
       if (room.members.some((m) => m.name.toLowerCase() === name.toLowerCase())) return err('Такое имя уже занято в комнате');
@@ -364,6 +436,9 @@ function handle(ws: WebSocket, conn: Conn, raw: string) {
       send(ws, { type: 'left' });
       return;
     }
+    case 'listrooms':
+      send(ws, { type: 'rooms', rooms: roomList() });
+      return;
     case 'ping':
       send(ws, { type: 'pong' });
       return;
@@ -413,6 +488,8 @@ const server = http.createServer(async (req, res) => {
 const wss = new WebSocketServer({ server, path: '/ws', maxPayload: 16 * 1024 });
 wss.on('connection', (ws) => {
   const conn: Conn = { room: null, member: null };
+  connections.set(ws, conn);
+  send(ws, { type: 'rooms', rooms: roomList() });
   let alive = true;
   ws.on('pong', () => (alive = true));
   const beat = setInterval(() => {
@@ -430,6 +507,7 @@ wss.on('connection', (ws) => {
   });
   ws.on('close', () => {
     clearInterval(beat);
+    connections.delete(ws);
     const { room, member } = conn;
     if (room && member && member.socket === ws) {
       member.socket = null;
